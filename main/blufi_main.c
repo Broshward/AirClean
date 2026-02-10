@@ -795,6 +795,9 @@ void TempTask(void *pvParameters)
     ESP_LOGI(TAG_I2C, "I2C de-initialized successfully");
 }
 
+
+void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_client_v4.c file
+
 void app_main(void)
 {
     esp_err_t ret;
@@ -829,5 +832,6 @@ void app_main(void)
 	xTaskCreate( pingTask, "ping", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
 	xTaskCreate( TempTask, "Light", 10000, NULL, 1, NULL);
+	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, NULL);
 
 }
