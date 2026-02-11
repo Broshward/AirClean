@@ -573,18 +573,6 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
     esp_ping_delete_session(hdl);
 }
 
-//static struct {
-//    struct arg_dbl *timeout;
-//    struct arg_dbl *interval;
-//    struct arg_int *data_size;
-//    struct arg_int *count;
-//    struct arg_int *tos;
-//    struct arg_int *ttl;
-//    struct arg_int *interface;
-//    struct arg_str *host;
-//    struct arg_end *end;
-//} ping_args;
-
 static int do_ping_cmd(char *addr)
 {
     esp_ping_config_t config = ESP_PING_DEFAULT_CONFIG();
@@ -832,6 +820,7 @@ void app_main(void)
 	xTaskCreate( pingTask, "ping", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
 	xTaskCreate( TempTask, "Light", 10000, NULL, 1, NULL);
+
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, NULL);
 
 }

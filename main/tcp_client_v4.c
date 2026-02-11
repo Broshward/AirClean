@@ -12,9 +12,12 @@
 #include <arpa/inet.h>
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #if defined(CONFIG_EXAMPLE_SOCKET_IP_INPUT_STDIN)
 #include "addr_from_stdin.h"
 #endif
+
+//#include "blufi.h"
 
 //#if defined(CONFIG_EXAMPLE_IPV4)
 //#define HOST_IP_ADDR CONFIG_EXAMPLE_IPV4_ADDR
@@ -22,7 +25,7 @@
 #define HOST_IP_ADDR "192.168.1.43"						// Debug IP-address
 //#endif
 #define PORT 3333	// Test port for debug
-#define TIME_PERIOD 1000*1 // Perod between sends
+#define TIME_PERIOD 10000*1 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 
 static const char *TAG = "TCP_IP";
@@ -36,6 +39,19 @@ void tcp_clientTask(void *pvParameters)
     int addr_family = 0;
     int ip_protocol = 0;
 
+// Device MAC getting
+	uint8_t mac[6];
+	esp_base_mac_addr_get(mac);
+// String for sending to server
+	char  data[1024];
+	sprintf(data, "#");
+	for (int i=0;i<6;i++) sprintf(data+strlen(data), "%x:", mac[i]);
+	data[strlen(data)-1]='\0';
+	sprintf(data+strlen(data),"#AirClean"); // The NAME field
+	sprintf(data+strlen(data),"\n");
+//gl_sta_bssid[6];
+	//sprinf(data+strlen(data),)
+	printf(data);
     while (1) {
 //#if defined(CONFIG_EXAMPLE_IPV4)
         struct sockaddr_in dest_addr;
@@ -65,7 +81,7 @@ void tcp_clientTask(void *pvParameters)
 
         while (1) {
 // Send to server
-            int err = send(sock, payload, strlen(payload), 0);
+            int err = send(sock, data, strlen(data), 0);
             if (err < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
