@@ -13,24 +13,17 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_wifi.h"
 #if defined(CONFIG_EXAMPLE_SOCKET_IP_INPUT_STDIN)
 #include "addr_from_stdin.h"
 #endif
 
-//#include "blufi.h"
-
-//#if defined(CONFIG_EXAMPLE_IPV4)
-//#define HOST_IP_ADDR CONFIG_EXAMPLE_IPV4_ADDR
-//#elif defined(CONFIG_EXAMPLE_SOCKET_IP_INPUT_STDIN)
 #define HOST_IP_ADDR "192.168.1.43"						// Debug IP-address
-//#endif
-#define PORT 3333	// Test port for debug
+#define PORT 3344	// Test port for debug
 #define TIME_PERIOD 10000*1 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 
-static const char *TAG = "TCP_IP";
-static const char *payload = "Message from ESP32 ";
-
+static const char *TCP_TAG = "TCP_IP";
 
 void tcp_clientTask(void *pvParameters)
 {
@@ -44,14 +37,6 @@ void tcp_clientTask(void *pvParameters)
 	esp_base_mac_addr_get(mac);
 // String for sending to server
 	char  data[1024];
-	sprintf(data, "#");
-	for (int i=0;i<6;i++) sprintf(data+strlen(data), "%x:", mac[i]);
-	data[strlen(data)-1]='\0';
-	sprintf(data+strlen(data),"#AirClean"); // The NAME field
-	sprintf(data+strlen(data),"\n");
-//gl_sta_bssid[6];
-	//sprinf(data+strlen(data),)
-	printf(data);
     while (1) {
 //#if defined(CONFIG_EXAMPLE_IPV4)
         struct sockaddr_in dest_addr;
@@ -67,23 +52,38 @@ void tcp_clientTask(void *pvParameters)
 
         int sock =  socket(addr_family, SOCK_STREAM, ip_protocol);
         if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            ESP_LOGE(TCP_TAG, "Unable to create socket: errno %d", errno);
 //            break;
         }
-        ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
+        ESP_LOGI(TCP_TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
 
         int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
-            ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
+            ESP_LOGE(TCP_TAG, "Socket unable to connect: errno %d", errno);
 //            break;
         }
-        ESP_LOGI(TAG, "Successfully connected");
+        ESP_LOGI(TCP_TAG, "Successfully connected");
 
         while (1) {
+// Add sensors information
+		sprintf(data,"#"MACSTR, MAC2STR(mac));
+		sprintf(data+strlen(data),"#AirClean"); // The NAME field
+// Add BSSID and RSSI information
+		wifi_ap_record_t ap_info;
+		esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
+		if (res == ESP_OK) {
+			ESP_LOGI(TCP_TAG, "RSSI: %d dBm\n", ap_info.rssi);
+		} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
+			ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
+		} else {
+			ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
+		}
+		sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
+		sprintf(data+strlen(data),"\n");
 // Send to server
             int err = send(sock, data, strlen(data), 0);
             if (err < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                ESP_LOGE(TCP_TAG, "Error occurred during sending: errno %d", errno);
                 break;
             }
 // Recieve part for server ansvers
@@ -103,7 +103,7 @@ void tcp_clientTask(void *pvParameters)
         }
 
         if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
+            ESP_LOGE(TCP_TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }

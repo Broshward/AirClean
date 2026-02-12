@@ -13,6 +13,7 @@
 ****************************************************************************/
 
 #include "oneshot_read_adc_main.c"
+#include "tcp_client_v4.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -270,7 +271,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         BLUFI_INFO("station "MACSTR" leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
         break;
     }
-
     default:
         break;
     }
@@ -288,6 +288,7 @@ static void initialise_wifi(void)
     assert(ap_netif);
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+	
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
@@ -783,8 +784,6 @@ void TempTask(void *pvParameters)
     ESP_LOGI(TAG_I2C, "I2C de-initialized successfully");
 }
 
-
-void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_client_v4.c file
 
 void app_main(void)
 {
