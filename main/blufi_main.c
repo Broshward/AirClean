@@ -86,6 +86,10 @@ static wifi_sta_list_t gl_sta_list;
 static bool gl_sta_is_connecting = false;
 static esp_blufi_extra_info_t gl_sta_conn_info;
 
+
+TaskHandle_t tcptask;
+
+
 static void example_record_wifi_conn_info(int rssi, uint8_t reason)
 {
     memset(&gl_sta_conn_info, 0, sizeof(esp_blufi_extra_info_t));
@@ -182,6 +186,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         memcpy(gl_sta_bssid, event->bssid, 6);
         memcpy(gl_sta_ssid, event->ssid, event->ssid_len);
         gl_sta_ssid_len = event->ssid_len;
+		xTaskNotifyGive(tcptask);
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
         /* Only handle reconnection during connecting */
@@ -530,6 +535,6 @@ void app_main(void)
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
 	xTaskCreate( TempTask, "Light", 10000, NULL, 1, NULL);
 
-	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, NULL);
+	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
 
 }

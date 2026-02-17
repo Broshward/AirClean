@@ -18,7 +18,9 @@
 #include "esp_check.h"
 #include "esp_netif.h"
 
-const static char *TAG_PING = "PING:";
+const static char *PING_TAG = "PING:";
+bool gl_ping=0;
+char gl_narodmon_addr[44];   // Заменить на максимальную длину строки IP-адреса
 
 static void cmd_ping_on_ping_success(esp_ping_handle_t hdl, void *args)
 {
@@ -31,8 +33,9 @@ static void cmd_ping_on_ping_success(esp_ping_handle_t hdl, void *args)
     esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
     esp_ping_get_profile(hdl, ESP_PING_PROF_SIZE, &recv_len, sizeof(recv_len));
     esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
-    printf("%" PRIu32 " bytes from %s icmp_seq=%" PRIu16 " ttl=%" PRIu16 " time=%" PRIu32 " ms\n",
+    ESP_LOGI(PING_TAG,"%" PRIu32 " bytes from %s icmp_seq=%" PRIu16 " ttl=%" PRIu16 " time=%" PRIu32 " ms",
            recv_len, ipaddr_ntoa((ip_addr_t*)&target_addr), seqno, ttl, elapsed_time);
+	strcpy(gl_narodmon_addr, ipaddr_ntoa((ip_addr_t*)&target_addr));
 }
 
 static void cmd_ping_on_ping_timeout(esp_ping_handle_t hdl, void *args)
@@ -44,7 +47,6 @@ static void cmd_ping_on_ping_timeout(esp_ping_handle_t hdl, void *args)
     printf("From %s icmp_seq=%d timeout\n",ipaddr_ntoa((ip_addr_t*)&target_addr), seqno);
 }
 
-bool ping=0;
 static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
 {
     ip_addr_t target_addr;
@@ -63,20 +65,20 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
     } else {
         loss = 0;
     }
-#ifdef CONFIG_LWIP_IPV4
-    if (IP_IS_V4(&target_addr)) {
-        printf("\n--- %s ping statistics ---\n", inet_ntoa(*ip_2_ip4(&target_addr)));
-    }
-#endif
-#ifdef CONFIG_LWIP_IPV6
-    if (IP_IS_V6(&target_addr)) {
-        printf("\n--- %s ping statistics ---\n", inet6_ntoa(*ip_2_ip6(&target_addr)));
-    }
-#endif
-    printf("%" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, time %" PRIu32 "ms\n",
+//#ifdef CONFIG_LWIP_IPV4
+//    if (IP_IS_V4(&target_addr)) {
+//        printf("\n--- %s ping statistics ---\n", inet_ntoa(*ip_2_ip4(&target_addr)));
+//    }
+//#endif
+//#ifdef CONFIG_LWIP_IPV6
+//    if (IP_IS_V6(&target_addr)) {
+//        printf("\n--- %s ping statistics ---\n", inet6_ntoa(*ip_2_ip6(&target_addr)));
+//    }
+//#endif
+    ESP_LOGI(PING_TAG, "%" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, time %" PRIu32 "ms\n",
            transmitted, received, loss, total_time_ms);
-	if(received==0) ping=false;
-	else ping=true;
+	if(received==0) gl_ping=false;
+	else gl_ping=true;
     // delete the ping sessions, so that we clean up all resources and can create a new ping session
     // we don't have to call delete function in the callback, instead we can call delete function from other tasks
     esp_ping_delete_session(hdl);
@@ -127,8 +129,8 @@ static int do_ping_cmd(char *addr)
         .on_ping_end = cmd_ping_on_ping_end
     };
     esp_ping_handle_t ping;
-    ESP_RETURN_ON_FALSE(esp_ping_new_session(&config, &cbs, &ping) == ESP_OK, -1, TAG_PING, "esp_ping_new_session failed");
-    ESP_RETURN_ON_FALSE(esp_ping_start(ping) == ESP_OK, -1, TAG_PING, "esp_ping_start() failed");
+    ESP_RETURN_ON_FALSE(esp_ping_new_session(&config, &cbs, &ping) == ESP_OK, -1, PING_TAG, "esp_ping_new_session failed");
+    ESP_RETURN_ON_FALSE(esp_ping_start(ping) == ESP_OK, -1, PING_TAG, "esp_ping_start() failed");
     return 0;
 }
 
@@ -149,7 +151,7 @@ void pingTask(void * pvParameters)
 		do_ping_cmd("narodmon.com");
 		//do_ping_cmd("8.8.8.8");
 		//do_ping_cmd("192.168.1.100");
-		if (ping)
+		if (gl_ping)
 			gpio_set_level(BLINK_GPIO, 0);
 		else
 			gpio_set_level(BLINK_GPIO, 1);
@@ -173,7 +175,7 @@ void LightTask(void *pvParameters)
         if (do_calibration1_chan0) {
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0][0], &voltage[0][0]));
 			gl_luminosity = pow(10,((float)voltage[0][0]-250.0)/500); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
-            ESP_LOGI(TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
+            ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
         }
         vTaskDelay(pdMS_TO_TICKS(CONFIG_LIGHT_ADC_PERIOD));
 
@@ -272,31 +274,31 @@ void config_MCP9800()
 float temperature_calc(uint8_t *data)
 {
 	float temp = ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
-    //ESP_LOGI(TAG_I2C, "Temperature = %X %X", data[0], data[1]);
-    //ESP_LOGI(TAG_I2C, "Temperature = %f", temp); 
+    //ESP_LOGI(I2C_TAG, "Temperature = %X %X", data[0], data[1]);
+    //ESP_LOGI(I2C_TAG, "Temperature = %f", temp); 
 	return temp;
 }
 #define CONFIG_TEMP_PERIOD 10000 //10 sec
 void TempTask(void *pvParameters)
 {
     i2c_master_init(&bus_handle, &dev_handle);
-    ESP_LOGI(TAG_I2C, "I2C initialized successfully");
+    ESP_LOGI(I2C_TAG, "I2C initialized successfully");
 
 	config_MCP9800();
 	//Read configuration
     register_read(dev_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
-    ESP_LOGI(TAG_I2C, "Configuration register = 0x%X", gl_temperature[0]);
+    ESP_LOGI(I2C_TAG, "Configuration register = 0x%X", gl_temperature[0]);
 
 	while(1){
 		register_read(dev_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-		ESP_LOGI(TAG_I2C, "Temperature = %f", temperature_calc(gl_temperature));
+		ESP_LOGI(I2C_TAG, "Temperature = %f", temperature_calc(gl_temperature));
 
         vTaskDelay(pdMS_TO_TICKS(CONFIG_TEMP_PERIOD));
 	}    /* Demonstrate writing by resetting the MPU9250 */
 
     ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
-    ESP_LOGI(TAG_I2C, "I2C de-initialized successfully");
+    ESP_LOGI(I2C_TAG, "I2C de-initialized successfully");
 }
 
 /*
@@ -319,9 +321,10 @@ void TempTask(void *pvParameters)
 #include "addr_from_stdin.h"
 #endif
 
+//#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
 #define HOST_IP_ADDR "192.168.1.43"						// Debug IP-address
-#define PORT 3344	// Test port for debug
-#define TIME_PERIOD 10000*1 // Perod between sends
+#define PORT 8283			// narodmon.com TCP-port address
+#define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 
 static const char *TCP_TAG = "TCP_IP";
@@ -329,7 +332,7 @@ static const char *TCP_TAG = "TCP_IP";
 void tcp_clientTask(void *pvParameters)
 {
     char rx_buffer[128];
-    char host_ip[] = HOST_IP_ADDR;
+    char host_ip[] = HOST_IP_ADDR; //gl_narodmon_addr;
     int addr_family = 0;
     int ip_protocol = 0;
 
@@ -366,48 +369,56 @@ void tcp_clientTask(void *pvParameters)
         ESP_LOGI(TCP_TAG, "Successfully connected");
 
         while (1) {
-// Add sensors MAC, NAME info
-		sprintf(data,"#"MACSTR, MAC2STR(mac));
-		sprintf(data+strlen(data),"#AirClean"); // The NAME field
-		sprintf(data+strlen(data),"\n");
-// Add BSSID and RSSI information
-		wifi_ap_record_t ap_info;
-		esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
-		if (res == ESP_OK) {
-			ESP_LOGI(TCP_TAG, "RSSI: %d dBm\n", ap_info.rssi);
-		} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
-			ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
-		} else {
-			ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
-		}
-		sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
-		sprintf(data+strlen(data),"\n");
-//Add temperature sensor info
-		sprintf(data+strlen(data),"#T1#%.2f", temperature_calc(gl_temperature));
-		sprintf(data+strlen(data),"\n");
-//Add temperature sensor info
-		sprintf(data+strlen(data),"#L1#%.2f", gl_luminosity);
-		sprintf(data+strlen(data),"\n");
-// Send to server
+	// Add sensors MAC, NAME info
+			sprintf(data,"#"MACSTR, MAC2STR(mac));
+			sprintf(data+strlen(data),"#AirClean"); // The NAME field
+			sprintf(data+strlen(data),"\n");
+	// Add BSSID and RSSI information
+			wifi_ap_record_t ap_info;
+			esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
+			if (res == ESP_OK) {
+				ESP_LOGI(TCP_TAG, "RSSI: %d dBm\n", ap_info.rssi);
+			} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
+				ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
+			} else {
+				ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
+			}
+			sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
+			sprintf(data+strlen(data),"\n");
+	//Add temperature sensor info
+			sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
+			sprintf(data+strlen(data),"\n");
+	//Add temperature sensor info
+			sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
+			sprintf(data+strlen(data),"\n");
+	// End of package
+			sprintf(data+strlen(data),"##");
+	// Send to server
             int err = send(sock, data, strlen(data), 0);
             if (err < 0) {
                 ESP_LOGE(TCP_TAG, "Error occurred during sending: errno %d", errno);
                 break;
             }
 // Recieve part for server ansvers
-            //int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-            //// Error occurred during receiving
-            //if (len < 0) {
-            //    ESP_LOGE(TAG, "recv failed: errno %d", errno);
-            //    break;
-            //}
-            //// Data received
-            //else {
-            //    rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-            //    ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
-            //    ESP_LOGI(TAG, "%s", rx_buffer);
-            //}
+#define TIMEOUT 1000*1
+			vTaskDelay(pdMS_TO_TICKS(TIMEOUT)); // Timeout server reply
+            int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+            // Error occurred during receiving
+            if (len < 0) {
+                ESP_LOGE(TCP_TAG, "recv failed: errno %d", errno);
+                //break;
+            }
+            // Data received
+            else {
+                rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
+                ESP_LOGI(TCP_TAG, "Received %d bytes from %s:", len, host_ip);
+                ESP_LOGI(TCP_TAG, "%s", rx_buffer);
+            }
 			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
+//xTaskNotifyGive(tcptask);
+//ulTaskNotifyTake(true, portMAX_DELAY);
+			printf("----------------------------------------------------------------------\n");
+			//Нужно поставить отправку уведомления в задачу пинга. Когда пинг начнётся, только тогда возобновить задачу отправки данных на сервер -> ulTaskNotifyTake(true, portMAX_DELAY);
         }
 
         if (sock != -1) {
