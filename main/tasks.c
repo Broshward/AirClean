@@ -116,6 +116,7 @@ hint.ai_flags = AI_ADDRCONFIG; // Использовать только те п�
         /* convert ip4 string or hostname to ip4 or ip6 address */
         if (getaddrinfo(addr, NULL, &hint, &res) != 0) {
             printf("ping: unknown host %s\n", addr);
+			gl_ping=false;
             return 1;
         }
 #ifdef CONFIG_LWIP_IPV4
@@ -339,8 +340,7 @@ void tcp_clientTask(void *pvParameters)
 	int sock=-1;
     while (1) {
 		do {
-			//do_ping_cmd("narodmon.com");
-			do_ping_cmd("185.245.187.136");
+			do_ping_cmd("narodmon.com");
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
 		} while(!gl_ping);
@@ -361,14 +361,14 @@ void tcp_clientTask(void *pvParameters)
 		sock =  socket(addr_family, SOCK_STREAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TCP_TAG, "Unable to create socket: errno %d", errno);
-//            break;
+            continue;
         }
         ESP_LOGI(TCP_TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
 
         int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
             ESP_LOGE(TCP_TAG, "Socket unable to connect: errno %d", errno);
-//            break;
+            continue;
         }
         ESP_LOGI(TCP_TAG, "Successfully connected");
 
@@ -403,7 +403,6 @@ void tcp_clientTask(void *pvParameters)
             if (err < 0) {
                 ESP_LOGE(TCP_TAG, "Error occurred during sending: errno %d", errno);
 				continue;
-            //    break;
             }
 // Recieve part for server ansvers
 #define TIMEOUT 1000*1
@@ -413,7 +412,6 @@ void tcp_clientTask(void *pvParameters)
             if (len < 0) {
                 ESP_LOGE(TCP_TAG, "recv failed: errno %d", errno);
 				continue;
-            //    break;
             }
             // Data received
             else {
