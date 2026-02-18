@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 
+void configure_led(void);
 void pingTask(void * pvParameters);		// Ping task
 void LightTask(void *pvParameters);		// Luminosity task
 void TempTask(void *pvParameters);		// Temperature task function prototype

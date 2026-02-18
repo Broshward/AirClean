@@ -186,7 +186,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         memcpy(gl_sta_bssid, event->bssid, 6);
         memcpy(gl_sta_ssid, event->ssid, event->ssid_len);
         gl_sta_ssid_len = event->ssid_len;
-		xTaskNotifyGive(tcptask);
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
         /* Only handle reconnection during connecting */
@@ -531,7 +530,8 @@ void app_main(void)
     BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
 
 
-	xTaskCreate( pingTask, "ping", 10000, NULL, 1, NULL);
+    configure_led();
+	//xTaskCreate( pingTask, "ping", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
 	xTaskCreate( TempTask, "Light", 10000, NULL, 1, NULL);
 
