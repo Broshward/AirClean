@@ -270,12 +270,10 @@ void config_MCP9800()
 float temperature_calc(uint8_t *data)
 {
 	float temp = ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
-    //ESP_LOGI(I2C_TAG, "Temperature = %X %X", data[0], data[1]);
-    //ESP_LOGI(I2C_TAG, "Temperature = %f", temp); 
 	return temp;
 }
 #define CONFIG_TEMP_PERIOD 10000 //10 sec
-void TempTask(void *pvParameters)
+void I2C_Task(void *pvParameters)
 {
     i2c_master_init(&bus_handle, &dev_handle);
     ESP_LOGI(I2C_TAG, "I2C initialized successfully");
@@ -287,7 +285,7 @@ void TempTask(void *pvParameters)
 
 	while(1){
 		register_read(dev_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-		ESP_LOGI(I2C_TAG, "Temperature = %f", temperature_calc(gl_temperature));
+		ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
 
         vTaskDelay(pdMS_TO_TICKS(CONFIG_TEMP_PERIOD));
 	}    /* Demonstrate writing by resetting the MPU9250 */
@@ -295,6 +293,26 @@ void TempTask(void *pvParameters)
     ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
     ESP_LOGI(I2C_TAG, "I2C de-initialized successfully");
+}
+
+#include "driver/temperature_sensor.h"
+void Temp_sensor_Task(void * pvParameters)
+{
+	temperature_sensor_handle_t temp_handle = NULL;
+	temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 50);
+	ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_handle));
+	while(1){
+		// Enable temperature sensor
+		ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
+		// Get converted sensor data
+		float tsens_out;
+		ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &tsens_out));
+		printf("CHIP Temperature  in %.2f °C\n", tsens_out);
+		// Disable the temperature sensor if it is not needed and save the power
+		ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
+#define TEMP_PERIOD 1000*10
+		vTaskDelay(pdMS_TO_TICKS(TEMP_PERIOD));
+	}
 }
 
 /*
@@ -424,6 +442,9 @@ void tcp_clientTask(void *pvParameters)
 			printf("----------------------------------------------------------------------\n");
         //}
 
+			esp_wifi_stop();			
 			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
+			esp_wifi_start();
+			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-TIMEOUT-PING_PERIOD)); //for time equails TIME_PERIOD
     }
 }

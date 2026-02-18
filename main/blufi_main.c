@@ -532,9 +532,9 @@ void app_main(void)
 
 
     configure_led();
-	//xTaskCreate( pingTask, "ping", 10000, NULL, 1, NULL);
+	xTaskCreate( Temp_sensor_Task, "TempSensor", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
-	xTaskCreate( TempTask, "Light", 10000, NULL, 1, NULL);
+	xTaskCreate( I2C_Task, "Light", 10000, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
 
