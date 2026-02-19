@@ -389,7 +389,6 @@ void tcp_clientTask(void *pvParameters)
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
 		} while(!gl_ping);
-		printf("!!!!!!!!!!!!!!!!! ping: %d\n",gl_ping);
 
         struct sockaddr_in dest_addr;
         inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
@@ -439,6 +438,12 @@ void tcp_clientTask(void *pvParameters)
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
                 //ESP_LOGI(TCP_TAG, "Received %d bytes from %s:", len, host_ip);
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
+				if (strcmp(rx_buffer,"OK")) 
+					while(1){
+						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
+						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
+					}
+				
             }
 //xTaskNotifyGive(tcptask);
 //ulTaskNotifyTake(true, portMAX_DELAY);
