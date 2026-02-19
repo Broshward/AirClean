@@ -335,13 +335,44 @@ void Temp_sensor_Task(void * pvParameters)
 #include "addr_from_stdin.h"
 #endif
 
+static const char *TCP_TAG = "TCP_IP";
+
+void create_data(char *data)
+{
+// Device MAC getting
+	uint8_t mac[6];
+	esp_base_mac_addr_get(mac);
+// Add sensors MAC, NAME info
+	sprintf(data,"#"MACSTR, MAC2STR(mac));
+	sprintf(data+strlen(data),"#AirClean"); // The NAME field
+	sprintf(data+strlen(data),"\n");
+// Add BSSID and RSSI information
+	wifi_ap_record_t ap_info;
+	esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
+	if (res == ESP_OK) {
+		ESP_LOGI(TCP_TAG, "RSSI: %d dBm", ap_info.rssi);
+	} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
+		ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
+	} else {
+		ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
+	}
+	sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
+	sprintf(data+strlen(data),"\n");
+//Add temperature sensor info
+	sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
+	sprintf(data+strlen(data),"\n");
+//Add temperature sensor info
+	sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
+	sprintf(data+strlen(data),"\n");
+// End of package
+	sprintf(data+strlen(data),"##");
+}
+
 //#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
 #define HOST_IP_ADDR "192.168.1.43"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
 #define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
-
-static const char *TCP_TAG = "TCP_IP";
 
 void tcp_clientTask(void *pvParameters)
 {
@@ -350,11 +381,7 @@ void tcp_clientTask(void *pvParameters)
     int addr_family = 0;
     int ip_protocol = 0;
 
-// Device MAC getting
-	uint8_t mac[6];
-	esp_base_mac_addr_get(mac);
 // String for sending to server
-	char  data[1024];
 	int sock=-1;
     while (1) {
 		do {
@@ -390,33 +417,9 @@ void tcp_clientTask(void *pvParameters)
         }
         ESP_LOGI(TCP_TAG, "Successfully connected");
 
-        //while (1) {
-	// Add sensors MAC, NAME info
-			sprintf(data,"#"MACSTR, MAC2STR(mac));
-			sprintf(data+strlen(data),"#AirClean"); // The NAME field
-			sprintf(data+strlen(data),"\n");
-	// Add BSSID and RSSI information
-			wifi_ap_record_t ap_info;
-			esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
-			if (res == ESP_OK) {
-				ESP_LOGI(TCP_TAG, "RSSI: %d dBm", ap_info.rssi);
-			} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
-				ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
-			} else {
-				ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
-			}
-			sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
-			sprintf(data+strlen(data),"\n");
-	//Add temperature sensor info
-			sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
-			sprintf(data+strlen(data),"\n");
-	//Add temperature sensor info
-			sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
-			sprintf(data+strlen(data),"\n");
-	// End of package
-			sprintf(data+strlen(data),"##");
+		char  data[1024];
+		create_data(data);
 	// Send to server
-            //int 
 			err = send(sock, data, strlen(data), 0);
             if (err < 0) {
                 ESP_LOGE(TCP_TAG, "Error occurred during sending: errno %d", errno);
@@ -440,11 +443,10 @@ void tcp_clientTask(void *pvParameters)
 //xTaskNotifyGive(tcptask);
 //ulTaskNotifyTake(true, portMAX_DELAY);
 			printf("----------------------------------------------------------------------\n");
-        //}
 
 			esp_wifi_stop();			
 			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
-			esp_wifi_start();
 			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-TIMEOUT-PING_PERIOD)); //for time equails TIME_PERIOD
+			esp_wifi_start();
     }
 }
