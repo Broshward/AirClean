@@ -2,7 +2,6 @@
 #include <math.h>
 
 
-
 #include <stdio.h>
 #include <string.h>
 #include "sdkconfig.h"
@@ -173,11 +172,11 @@ void LightTask(void *pvParameters)
         if (do_calibration1_chan0) {
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0][0], &voltage[0][0]));
 			gl_luminosity = pow(10,((float)voltage[0][0]-250.0)/500); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
-            ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
+            //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 
 			// Отправка через BluFi
 			char payload[40];
-			snprintf(payload, sizeof(payload), "Lumin: %.2f Lux", gl_luminosity);
+			snprintf(payload, sizeof(payload), "Lumin:%.2f", gl_luminosity);
 			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
         }
@@ -210,7 +209,6 @@ void LightTask(void *pvParameters)
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 
-#include "i2c_MCP9800.h"
 
 
 #define I2C_MASTER_SCL_IO           7 //CONFIG_I2C_MASTER_SCL       /*!< GPIO number used for I2C master clock */
@@ -225,6 +223,9 @@ void LightTask(void *pvParameters)
 #define MCP9800_TEMPERATURE_REG		0			// Temperature register address
 #define MCP9800_CONFIG_REG			1			// Configureation register address
 
+i2c_master_dev_handle_t dev_handle;
+i2c_master_bus_handle_t bus_handle;
+static const char *I2C_TAG = "i2c";
 uint8_t gl_temperature[2];
 
 /**
@@ -293,11 +294,11 @@ void I2C_Task(void *pvParameters)
 
 	while(1){
 		register_read(dev_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-		ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
+		//ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
 
 		// Отправка через BluFi
 		char payload[40];
-		snprintf(payload, sizeof(payload), "Amb_Temp :%.2f °C", temperature_calc(gl_temperature));
+		snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
 		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
         vTaskDelay(pdMS_TO_TICKS(CONFIG_TEMP_PERIOD));
@@ -320,7 +321,6 @@ void Temp_sensor_Task(void * pvParameters)
 		// Get converted sensor data
 		float tsens_out;
 		ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &tsens_out));
-		printf("CHIP Temperature  in %.2f °C\n", tsens_out);
 		// Disable the temperature sensor if it is not needed and save the power
 		ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
 
