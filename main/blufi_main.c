@@ -35,6 +35,7 @@
 #include "blufi.h"
 
 #include "esp_blufi.h"
+#include "lwip/ip_addr.h"
 
 #define EXAMPLE_WIFI_CONNECTION_MAXIMUM_RETRY CONFIG_EXAMPLE_WIFI_CONNECTION_MAXIMUM_RETRY
 #define EXAMPLE_INVALID_REASON                255
@@ -86,9 +87,48 @@ static wifi_sta_list_t gl_sta_list;
 static bool gl_sta_is_connecting = false;
 static esp_blufi_extra_info_t gl_sta_conn_info;
 
+const static char *BLUFI_TAG = "BLUFI";
 
 TaskHandle_t tcptask;
 
+
+void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
+{
+    nvs_handle_t my_handle;
+    if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
+        nvs_set_str(my_handle, "static_ip", ip);
+        nvs_set_str(my_handle, "static_mask", mask);
+        nvs_set_str(my_handle, "static_gw", gw);
+        nvs_commit(my_handle); // Записываем физически
+        nvs_close(my_handle);
+        ESP_LOGI("NVS", "Настройки сети сохранены!");
+    }
+}
+
+void load_and_apply_nvs_ip() 
+{
+    nvs_handle_t my_handle;
+    char ip[16], mask[16], gw[16];
+    size_t size = 16;
+    
+    if (nvs_open("storage", NVS_READONLY, &my_handle) == ESP_OK) {
+        if (nvs_get_str(my_handle, "static_ip", ip, &size) == ESP_OK) {
+			nvs_get_str(my_handle, "static_mask", mask, &size);
+			nvs_get_str(my_handle, "static_gw", gw, &size);
+			esp_netif_ip_info_t ip_info;
+			ip_info.ip.addr = ipaddr_addr(ip);
+			ip_info.netmask.addr = ipaddr_addr(mask);
+			ip_info.gw.addr = ipaddr_addr(gw);
+			esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+			esp_netif_dhcpc_stop(netif);
+			esp_netif_set_ip_info(netif, &ip_info);
+            // Если нашли IP, читаем остальные и вызываем esp_netif_set_ip_info
+            // (точно так же, как делали в обработчике BluFi)
+            ESP_LOGI("NVS", "Загружен статический IP: %s", ip);
+        }
+        nvs_close(my_handle);
+    }
+}
 
 static void example_record_wifi_conn_info(int rssi, uint8_t reason)
 {
@@ -145,10 +185,22 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
 
     switch (event_id) {
     case IP_EVENT_STA_GOT_IP: {
-        esp_blufi_extra_info_t info;
 
+	    ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+	    char net_info[128];
+
+	    // Формируем строку: IP|MASK|GW
+	    snprintf(net_info, sizeof(net_info), "NET:%d.%d.%d.%d|%d.%d.%d.%d|%d.%d.%d.%d",
+	             IP2STR(&event->ip_info.ip),
+	             IP2STR(&event->ip_info.netmask),
+	             IP2STR(&event->ip_info.gw));
+	
+	    esp_blufi_send_custom_data((uint8_t *)net_info, strlen(net_info));
+
+        esp_blufi_extra_info_t info;
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
         esp_wifi_get_mode(&mode);
+		
 
         memset(&info, 0, sizeof(esp_blufi_extra_info_t));
         memcpy(info.sta_bssid, gl_sta_bssid, 6);
@@ -298,6 +350,9 @@ static void initialise_wifi(void)
     ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     example_record_wifi_conn_info(EXAMPLE_INVALID_RSSI, EXAMPLE_INVALID_REASON);
+	
+	
+	load_and_apply_nvs_ip();// Read IP,mask,gw from flash
     ESP_ERROR_CHECK( esp_wifi_start() );
 }
 
@@ -472,11 +527,90 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         }
         break;
     }
-    case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA:
+    case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA: {
         BLUFI_INFO("Recv Custom Data %" PRIu32 "\n", param->custom_data.data_len);
         ESP_LOG_BUFFER_HEX("Custom Data", param->custom_data.data, param->custom_data.data_len);
-		printf ("Custom Data: %s", (char*)param->custom_data.data);
-        break;
+
+	    // 1. Превращаем пришедшие данные в строку
+	    char *cmd = (char *)malloc(param->custom_data.data_len + 1);
+	    memcpy(cmd, param->custom_data.data, param->custom_data.data_len);
+	    cmd[param->custom_data.data_len] = '\0';
+		ESP_LOGI (BLUFI_TAG, "Custom Data: %s\n", cmd);
+	
+	    // 2. Проверяем команду
+	    if (strcmp(cmd, "GET_NET") == 0) {
+	        esp_netif_ip_info_t ip_info;
+	        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+	        
+			// Проверяем статус DHCP клиента
+			esp_netif_dhcp_status_t status;
+			esp_netif_dhcpc_get_status(netif, &status);
+			// Если статус ESP_NETIF_DHCP_STOPPED (3), значит у нас Static
+			int is_static_mode = (status == 2) ? 1 : 0;
+
+			if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+				char response[100];
+				// Добавляем режим в конец строки: IP|MASK|GW|MODE
+				snprintf(response, sizeof(response), "NET:" IPSTR "|" IPSTR "|" IPSTR "|%d",
+						 IP2STR(&ip_info.ip),
+						 IP2STR(&ip_info.netmask),
+						 IP2STR(&ip_info.gw),
+						 is_static_mode);
+				
+				esp_blufi_send_custom_data((uint8_t *)response, strlen(response));
+			}
+		}
+		if (strncmp(cmd, "SET_STATIC:", 11) == 0) {
+			char *data = cmd + 11; // Пропускаем префикс
+			char ip_str[16], mask_str[16], gw_str[16];
+		
+			// Парсим строку формата "IP|MASK|GW"
+			if (sscanf(data, "%[^|]|%[^|]|%s", ip_str, mask_str, gw_str) == 3) {
+				esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+				
+				// 1. Останавливаем DHCP клиент (обязательно!)
+				esp_netif_dhcpc_stop(netif);
+		
+				// 2. Заполняем структуру новыми данными
+				esp_netif_ip_info_t ip_info;
+				ip_info.ip.addr = ipaddr_addr(ip_str);
+				ip_info.netmask.addr = ipaddr_addr(mask_str);
+				ip_info.gw.addr = ipaddr_addr(gw_str);
+		
+				// 3. Применяем настройки
+				esp_netif_set_ip_info(netif, &ip_info);
+				
+				ESP_LOGI("BLUFI", "Применен Static IP: %s", ip_str);
+				
+				// Отправим подтверждение обратно в приложение
+	            char resp[100];
+				snprintf(resp, sizeof(resp), "CONFIRM_STATIC:%s", ip_str);
+				esp_blufi_send_custom_data((uint8_t *)resp, strlen(resp));
+
+				// Запись новых значений во флэш
+				save_static_ip_to_nvs(ip_str, mask_str, gw_str);
+			}
+		}
+		if (strcmp(cmd, "SET_DHCP") == 0) {
+		    nvs_handle_t my_handle;
+		    if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
+		        // Удаляем ключи из памяти
+		        nvs_erase_key(my_handle, "static_ip");
+		        nvs_erase_key(my_handle, "static_mask");
+		        nvs_erase_key(my_handle, "static_gw");
+		        nvs_commit(my_handle);
+		        nvs_close(my_handle);
+		    }
+		    
+		    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+		    esp_netif_dhcpc_start(netif); // Снова включаем автополучение
+		    ESP_LOGI("NVS", "Режим DHCP восстановлен");
+		}
+
+	    free(cmd);
+	    break;
+	}
+
 	case ESP_BLUFI_EVENT_RECV_USERNAME:
         /* Not handle currently */
         break;
@@ -531,12 +665,20 @@ void app_main(void)
 
     BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
 
-
     configure_led();
 	xTaskCreate( Temp_sensor_Task, "TempSensor", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
-	xTaskCreate( I2C_Task, "Light", 10000, NULL, 1, NULL);
+	xTaskCreate( I2C_Task, "Temp", 10000, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
+	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL);
+
+//	time_t now;
+//	while(1){
+//		time(&now);
+//		printf("========= Time: %d\n", (int)now);
+//		printf("========= Time: %s\n", ctime(&now));
+//		vTaskDelay(pdMS_TO_TICKS(10000));
+//	}
 
 }
