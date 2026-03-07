@@ -546,7 +546,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 			esp_netif_dhcp_status_t status;
 			esp_netif_dhcpc_get_status(netif, &status);
 			// Если статус ESP_NETIF_DHCP_STOPPED (3), значит у нас Static
-			int is_static_mode = (status == 2) ? 1 : 0;
+			int is_static_mode = (status == ESP_NETIF_DHCP_STOPPED) ? 1 : 0;
 
 			if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
 				char response[100];

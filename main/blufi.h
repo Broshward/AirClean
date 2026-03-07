@@ -25,4 +25,3 @@ esp_err_t esp_blufi_host_deinit(void);
 esp_err_t esp_blufi_controller_init(void);
 esp_err_t esp_blufi_controller_deinit(void);
 
-//void do_ping_cmd(char *addr);

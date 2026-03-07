@@ -1,4 +1,5 @@
 #include "tasks.h"
+#include "sntp.h"
 #include <math.h>
 
 
@@ -22,6 +23,7 @@
 
 const static char *PING_TAG = "PING:";
 bool gl_ping=0;
+time_t gl_time=0;
 char gl_narodmon_addr[44];   // Заменить на максимальную длину строки IP-адреса
 
 static void cmd_ping_on_ping_success(esp_ping_handle_t hdl, void *args)
@@ -116,7 +118,7 @@ hint.ai_flags = AI_ADDRCONFIG; // Использовать только те п�
 
         /* convert ip4 string or hostname to ip4 or ip6 address */
         if (getaddrinfo(addr, NULL, &hint, &res) != 0) {
-            printf("ping: unknown host %s\n", addr);
+            //printf("ping: unknown host %s\n", addr);
 			gl_ping=false;
             return 1;
         }
@@ -171,7 +173,7 @@ void LightTask(void *pvParameters)
         //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN0, adc_raw[0][0]);
         if (do_calibration1_chan0) {
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0][0], &voltage[0][0]));
-			gl_luminosity = pow(10,((float)voltage[0][0]-250.0)/500); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+			gl_luminosity = pow(10,((float)voltage[0][0]-250.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
             //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 
 			// Отправка через BluFi
@@ -437,6 +439,7 @@ void tcp_clientTask(void *pvParameters)
 
 		char  data[1024];
 		create_data(data);
+
 	// Send to server
 			err = send(sock, data, strlen(data), 0);
             if (err < 0) {
@@ -444,7 +447,7 @@ void tcp_clientTask(void *pvParameters)
 				continue;
             }
 // Recieve part for server ansvers
-#define TIMEOUT 1000*1
+#define TIMEOUT 1000*1 
 			vTaskDelay(pdMS_TO_TICKS(TIMEOUT)); // Timeout for server reply
             int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
             // Error occurred during receiving
@@ -473,4 +476,14 @@ void tcp_clientTask(void *pvParameters)
 			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-TIMEOUT-PING_PERIOD)); //for time equails TIME_PERIOD
 			esp_wifi_start();
     }
+}
+
+#define TIME_CALIBRATION_PERIOD 1000*30//3600
+void timeTask(void *pvParameters)
+{
+	while(1){
+//		if (gl_ping)
+			obtain_time();
+		vTaskDelay(pdMS_TO_TICKS(TIME_CALIBRATION_PERIOD));
+	}
 }
