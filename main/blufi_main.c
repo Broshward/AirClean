@@ -671,8 +671,8 @@ void app_main(void)
 	xTaskCreate( I2C_Task, "Temp", 10000, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
-	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL);
-
+//	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL);
+//
 //	time_t now;
 //	while(1){
 //		time(&now);
