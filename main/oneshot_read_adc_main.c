@@ -21,10 +21,7 @@ const static char *ADC_TAG = "ADC";
         ADC General Macros
 ---------------------------------------------------------------*/
 
-static int adc_raw[2][10];
-static int voltage[2][10];
 static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle);
-static void example_adc_calibration_deinit(adc_cali_handle_t handle);
 
 void adc_config(void)
 {
@@ -102,14 +99,3 @@ static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel,
     return calibrated;
 }
 
-static void example_adc_calibration_deinit(adc_cali_handle_t handle)
-{
-#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
-    ESP_LOGI(ADC_TAG, "deregister %s calibration scheme", "Curve Fitting");
-    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
-
-#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-    ESP_LOGI(ADC_TAG, "deregister %s calibration scheme", "Line Fitting");
-    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
-#endif
-}

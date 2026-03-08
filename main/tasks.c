@@ -162,27 +162,42 @@ void configure_led(void)
 
 #include "oneshot_read_adc_main.c"
 /*ADC temperature sensor Task*/
-#define CONFIG_LIGHT_ADC_PERIOD 1000*10
+#define CONFIG_LIGHT_ADC_PERIOD 1000*1			//Период измерения
+#define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*10	//Период передачи показаний
 float gl_luminosity;
 
 void LightTask(void *pvParameters)
 {
 	adc_config();
+	// Переменная для хранения предыдущего значения
+	static int filtered_value;
+	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value); //Начальное значение 
+	const int coeff = 4; // Коэффициент фильтрации
+	int count=0;
     while (1) {
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &adc_raw[0][0]));
-        //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN0, adc_raw[0][0]);
         if (do_calibration1_chan0) {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0][0], &voltage[0][0]));
-			gl_luminosity = pow(10,((float)voltage[0][0]-250.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
-            //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 
-			// Отправка через BluFi
-			char payload[40];
-			snprintf(payload, sizeof(payload), "Lumin:%.2f", gl_luminosity);
-			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			int raw_value;
+			int voltage;
+			adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &raw_value);
+
+			// Применяем фильтр: y = (y * (k-1) + x) / k 
+			filtered_value = (filtered_value * (coeff - 1) + raw_value) / coeff;
+
+            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value, &voltage));
+
+			gl_luminosity = pow(10,((float)voltage-250.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+            //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 			
+			if (count == CONFIG_LIGHT_TRANSMIT_PERIOD/CONFIG_LIGHT_ADC_PERIOD){
+				// Отправка через BluFi
+				char payload[40];
+				snprintf(payload, sizeof(payload), "Lumin:%.2f", gl_luminosity);
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				count=0;
+			}
+			count++;
         }
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_LIGHT_ADC_PERIOD));
 
         //ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &adc_raw[0][1]));
         //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, adc_raw[0][1]);
@@ -191,15 +206,8 @@ void LightTask(void *pvParameters)
         //    ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage[0][1]);
         //}
         //vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_LIGHT_ADC_PERIOD));
     }
-    //Tear Down
-    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
-    if (do_calibration1_chan0) {
-        example_adc_calibration_deinit(adc1_cali_chan0_handle);
-    }
-    //if (do_calibration1_chan1) {
-    //    example_adc_calibration_deinit(adc1_cali_chan1_handle);
-    //}
 }
 
 
