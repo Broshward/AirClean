@@ -90,6 +90,7 @@ static esp_blufi_extra_info_t gl_sta_conn_info;
 const static char *BLUFI_TAG = "BLUFI";
 
 TaskHandle_t tcptask;
+TaskHandle_t reconnect_task;
 
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
@@ -255,6 +256,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         memset(gl_sta_bssid, 0, 6);
         gl_sta_ssid_len = 0;
         xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
+		xTaskNotifyGive(reconnect_task);
         break;
     case WIFI_EVENT_AP_START:
         esp_wifi_get_mode(&mode);
@@ -634,6 +636,16 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
     }
 }
 
+//Task for reconnect wifi
+void reconnectTask(void *pvParameters)
+{
+	while(1){
+		ulTaskNotifyTake(true, portMAX_DELAY);
+		vTaskDelay(pdMS_TO_TICKS(60000)); // 60 sec for reconnection
+		ESP_LOGI("WiFi","Reconnecting Wifi\n");
+		example_wifi_connect();
+	}
+}
 
 void app_main(void)
 {
@@ -671,6 +683,7 @@ void app_main(void)
 	xTaskCreate( I2C_Task, "Temp", 10000, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
+	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task);
 //	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL);
 //
 //	time_t now;

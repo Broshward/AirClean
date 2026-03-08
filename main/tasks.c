@@ -475,8 +475,6 @@ void tcp_clientTask(void *pvParameters)
 					}
 				
             }
-//xTaskNotifyGive(tcptask);
-//ulTaskNotifyTake(true, portMAX_DELAY);
 			printf("----------------------------------------------------------------------\n");
 
 			esp_wifi_stop();			
