@@ -18,6 +18,7 @@
 #include "esp_check.h"
 #include "esp_netif.h"
 #include "driver/gpio.h"
+#include "esp_attr.h"
 
 #include "esp_blufi_api.h"
 
@@ -402,6 +403,7 @@ void create_data(char *data)
 #define PORT 8283			// narodmon.com TCP-port address
 #define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
+RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
 void tcp_clientTask(void *pvParameters)
 {
@@ -413,11 +415,17 @@ void tcp_clientTask(void *pvParameters)
 // String for sending to server
 	int sock=-1;
     while (1) {
-		do {
+		time_t now;
+		time(&now);
+		printf("Time NOW: %d\n", (int)now);
+		printf("Time of last send: %d\n", (int)gl_last_send_time);
+		if (now-gl_last_send_time < TIME_PERIOD/1000)
+			vTaskDelay(pdMS_TO_TICKS(1000*(now-gl_last_send_time)));
+		do { 
 			do_ping_cmd("narodmon.com");
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
-		} while(!gl_ping);
+		} while(!gl_ping); //Ждём пинга
 
         struct sockaddr_in dest_addr;
         inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
@@ -445,8 +453,9 @@ void tcp_clientTask(void *pvParameters)
         }
         ESP_LOGI(TCP_TAG, "Successfully connected");
 
-		char  data[1024];
+		char  data[4096];
 		create_data(data);
+		ESP_LOGI(TCP_TAG, "Data length = %d\n",strlen(data));
 
 	// Send to server
 			err = send(sock, data, strlen(data), 0);
@@ -473,6 +482,10 @@ void tcp_clientTask(void *pvParameters)
 						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
 						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
 					}
+				else{
+					time(&now);
+					gl_last_send_time = now;
+				}
 				
             }
 			printf("----------------------------------------------------------------------\n");
@@ -494,9 +507,6 @@ void timeTask(void *pvParameters)
 		localtime_r(&now, &timeinfo);
 		char time_str[10];
 		strftime(time_str, sizeof(time_str), "%H_%M_%S", &timeinfo);
-		ESP_LOGI("Time","Current time: %d", (int)now);
-		ESP_LOGI("Time","Current time: %s", time_str);
-		ESP_LOGI("Time","Current time: %s", ctime(&now));
 		
 		char payload[15];
 		snprintf(payload, sizeof(payload), "Time:%s", time_str);
