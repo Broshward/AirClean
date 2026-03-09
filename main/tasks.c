@@ -484,12 +484,23 @@ void tcp_clientTask(void *pvParameters)
     }
 }
 
-#define TIME_CALIBRATION_PERIOD 1000*30//3600
+#define TIME_SEND_TIME 1000*10 //3600
 void timeTask(void *pvParameters)
 {
 	while(1){
-//		if (gl_ping)
-			obtain_time();
-		vTaskDelay(pdMS_TO_TICKS(TIME_CALIBRATION_PERIOD));
+		time_t now;
+		struct tm timeinfo;
+		time(&now);
+		localtime_r(&now, &timeinfo);
+		char time_str[10];
+		strftime(time_str, sizeof(time_str), "%H_%M_%S", &timeinfo);
+		ESP_LOGI("Time","Current time: %d", (int)now);
+		ESP_LOGI("Time","Current time: %s", time_str);
+		ESP_LOGI("Time","Current time: %s", ctime(&now));
+		
+		char payload[15];
+		snprintf(payload, sizeof(payload), "Time:%s", time_str);
+		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TIME));
 	}
 }

@@ -13,6 +13,7 @@
 ****************************************************************************/
 
 #include "tasks.h"
+#include "sntp.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,8 +91,9 @@ static esp_blufi_extra_info_t gl_sta_conn_info;
 const static char *BLUFI_TAG = "BLUFI";
 
 TaskHandle_t tcptask;
-TaskHandle_t reconnect_task;
 
+TaskHandle_t reconnect_task;
+void reconnectTask(void *pvParameters);
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
@@ -683,9 +685,12 @@ void app_main(void)
 	xTaskCreate( I2C_Task, "Temp", 10000, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
-	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task);
-//	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL);
-//
+	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task); //Task for WiFi reconnect
+
+	//Sincing time
+	sntp_init_and_sync();
+
+	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
 //	time_t now;
 //	while(1){
 //		time(&now);
