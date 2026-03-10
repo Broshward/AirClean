@@ -8,3 +8,5 @@ void I2C_Task(void *pvParameters);		// Temperature task function prototype
 void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_client_v4.c file
 void timeTask(void *pvParameters);
 
+#include "freertos/FreeRTOS.h"
+extern TaskHandle_t tcptask;

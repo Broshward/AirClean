@@ -1,4 +1,5 @@
 #include "tasks.h"
+#include "blufi.h"
 #include "sntp.h"
 #include <math.h>
 
@@ -408,6 +409,10 @@ RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
 void tcp_clientTask(void *pvParameters)
 {
+	ulTaskNotifyTake(true, portMAX_DELAY); // Wait for time syncing
+	gl_last_send_time = load_last_send_time(); //Load from nvs last sending time
+	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
+
     char rx_buffer[128];
     char host_ip[] = HOST_IP_ADDR; //gl_narodmon_addr;
     int addr_family = 0;
@@ -421,12 +426,12 @@ void tcp_clientTask(void *pvParameters)
 		printf("Time NOW: %d\n", (int)now);
 		printf("Time of last send: %d\n", (int)gl_last_send_time);
 		if (now-gl_last_send_time < TIME_PERIOD/1000)
-			vTaskDelay(pdMS_TO_TICKS(1000*(now-gl_last_send_time)));
+			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
 		do { 
-			do_ping_cmd("192.168.1.75");
+			do_ping_cmd(HOST_IP_ADDR);
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
-		} while(!gl_ping); //Ждём пинга
+		} while(!gl_ping); //Ждём пинга от сервера
 
         struct sockaddr_in dest_addr;
         inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
@@ -484,23 +489,21 @@ void tcp_clientTask(void *pvParameters)
 						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
 					}
 				else{
-					time(&now);
-					gl_last_send_time = now;
+					time(&gl_last_send_time);  //Set last send to server time
+					save_last_send_time(gl_last_send_time); // Write last send time to flash
 				}
 				
             }
 			printf("----------------------------------------------------------------------\n");
 
-			esp_wifi_stop();			
 			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
-			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-TIMEOUT-PING_PERIOD)); //for time equails TIME_PERIOD
-			esp_wifi_start();
     }
 }
 
 #define TIME_SEND_TIME 1000*10 //3600
 void timeTask(void *pvParameters)
 {
+	bool tcp_notify_given=false; //Эта переменная нужна, чтобы задача не надоедала уведомлениями
 	while(1){
 		time_t now;
 		struct tm timeinfo;
@@ -508,15 +511,20 @@ void timeTask(void *pvParameters)
 		localtime_r(&now, &timeinfo);
 		char time_str[10];
 		strftime(time_str, sizeof(time_str), "%H_%M_%S", &timeinfo);
-		
+	
 		char payload[15];
 		if (timeinfo.tm_year > 2025-1900) {
 			snprintf(payload, sizeof(payload), "Time:%s", time_str);
 			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			if (tcp_notify_given==false){
+				xTaskNotifyGive(tcptask);
+				tcp_notify_given=true;
+			}
 		}
 		else {
 			snprintf(payload, sizeof(payload), "Time:Not sync");
 			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			ESP_LOGI("Time", "Resync time");
     	    esp_sntp_stop();
     	    esp_sntp_init(); 
 		}

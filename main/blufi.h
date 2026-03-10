@@ -3,7 +3,9 @@
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
-
+#include <stdbool.h>
+#include "esp_err.h"
+#include "esp_blufi_api.h"
 
 #pragma once
 
