@@ -682,7 +682,6 @@ void app_main(void)
 
     BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
 
-    configure_led();
 	xTaskCreate( Temp_sensor_Task, "TempSensor", 10000, NULL, 1, NULL);
 	xTaskCreate( LightTask, "Light", 10000, NULL, 1, NULL);
 	xTaskCreate( I2C_Task, "Temp", 10000, NULL, 1, NULL);

@@ -4,6 +4,7 @@ idf_component_register(SRCS "blufi_main.c"
                             "blufi_init.c"
 							"tasks.c"
 							"sntp.c"
+							"ping.c"
                     PRIV_REQUIRES bt nvs_flash mbedtls esp_driver_gpio lwip esp_adc esp_driver_i2c esp_driver_tsens
 
                     INCLUDE_DIRS ".")
