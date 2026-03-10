@@ -2,6 +2,8 @@
 #include "blufi.h"
 #include "sntp.h"
 #include "ping.h"
+#include "i2c_MCP9800.h"
+
 #include <math.h>
 #include "esp_attr.h"
 #include "esp_blufi_api.h"
@@ -15,16 +17,14 @@
 #include "lwip/inet.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
-//#include "esp_console.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
-//#include "argtable3/argtable3.h"
-//#include "protocol_examples_common.h"
-
-
-
-
+#include "driver/temperature_sensor.h"
 #include "oneshot_read_adc_main.c"
+
+uint8_t gl_temperature[2];
+
+
 /*ADC temperature sensor Task*/
 #define CONFIG_LIGHT_ADC_PERIOD 1000*1			//Период измерения
 #define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*10	//Период передачи показаний
@@ -74,90 +74,13 @@ void LightTask(void *pvParameters)
     }
 }
 
-
-
-#include <stdio.h>
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "driver/i2c_master.h"
-
-
-
-#define I2C_MASTER_SCL_IO           7 //CONFIG_I2C_MASTER_SCL       /*!< GPIO number used for I2C master clock */
-#define I2C_MASTER_SDA_IO           10  //CONFIG_I2C_MASTER_SDA       /*!< GPIO number used for I2C master data  */
-#define I2C_MASTER_NUM              I2C_NUM_0                   /*!< I2C port number for master dev */
-#define I2C_MASTER_FREQ_HZ          100000 //CONFIG_I2C_MASTER_FREQUENCY /*!< I2C master clock frequency */
-#define I2C_MASTER_TX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_RX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_TIMEOUT_MS       1000
-
-#define MCP9800_SENSOR_ADDR         0b1001000        /*!< Address of the MCP9800 sensor */
-#define MCP9800_TEMPERATURE_REG		0			// Temperature register address
-#define MCP9800_CONFIG_REG			1			// Configureation register address
-
-i2c_master_dev_handle_t dev_handle;
-i2c_master_bus_handle_t bus_handle;
-static const char *I2C_TAG = "i2c";
-uint8_t gl_temperature[2];
-
-/**
- * @brief Read a sequence of bytes from a MPU9250 sensor registers
- */
-static esp_err_t register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
-{
-    return i2c_master_transmit_receive(dev_handle, &reg_addr, 1, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-}
-
-/**
- * @brief Write a byte to a MPU9250 sensor register
- */
-static esp_err_t register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data)
-{
-    uint8_t write_buf[2] = {reg_addr, data};
-    return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-}
-
-/**
- * @brief i2c master initialization
- */
-static void i2c_master_init(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t *dev_handle)
-{
-    i2c_master_bus_config_t bus_config = {
-        .i2c_port = I2C_MASTER_NUM,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, bus_handle));
-
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = MCP9800_SENSOR_ADDR,
-        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
-    };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(*bus_handle, &dev_config, dev_handle));
-
-}
-
-#define CONFIG_REGISTER_VALUE		(0b11<<5)
-#define TEMPERATURE_RESOLUTION		0.0625 
-void config_MCP9800()
-{
-	//Write configuration
-    register_write_byte(dev_handle, MCP9800_CONFIG_REG, CONFIG_REGISTER_VALUE); //12-bit resolution
-}
-float temperature_calc(uint8_t *data)
-{
-	float temp = ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
-	return temp;
-}
+const char *I2C_TAG = "i2c";
 #define CONFIG_TEMP_PERIOD 10000 //10 sec
 void I2C_Task(void *pvParameters)
 {
+	i2c_master_bus_handle_t bus_handle;
+	i2c_master_dev_handle_t dev_handle;
+
     i2c_master_init(&bus_handle, &dev_handle);
     ESP_LOGI(I2C_TAG, "I2C initialized successfully");
 
@@ -176,14 +99,10 @@ void I2C_Task(void *pvParameters)
 		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
         vTaskDelay(pdMS_TO_TICKS(CONFIG_TEMP_PERIOD));
-	}    /* Demonstrate writing by resetting the MPU9250 */
+	}
 
-    ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
-    ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
-    ESP_LOGI(I2C_TAG, "I2C de-initialized successfully");
 }
 
-#include "driver/temperature_sensor.h"
 void Temp_sensor_Task(void * pvParameters)
 {
 	temperature_sensor_handle_t temp_handle = NULL;

@@ -5,6 +5,7 @@ idf_component_register(SRCS "blufi_main.c"
 							"tasks.c"
 							"sntp.c"
 							"ping.c"
+							"i2c_MCP9800.c"
                     PRIV_REQUIRES bt nvs_flash mbedtls esp_driver_gpio lwip esp_adc esp_driver_i2c esp_driver_tsens
 
                     INCLUDE_DIRS ".")
