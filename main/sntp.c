@@ -43,3 +43,4 @@ void get_current_time_str(char* buf, size_t size)
     localtime_r(&now, &timeinfo);
     strftime(buf, size, "%H:%M:%S", &timeinfo);
 }
+

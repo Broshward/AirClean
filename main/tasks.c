@@ -21,6 +21,7 @@
 #include "esp_attr.h"
 
 #include "esp_blufi_api.h"
+#include "esp_sntp.h"
 
 const static char *PING_TAG = "PING:";
 bool gl_ping=0;
@@ -399,7 +400,7 @@ void create_data(char *data)
 }
 
 //#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
-#define HOST_IP_ADDR "192.168.1.43"						// Debug IP-address
+#define HOST_IP_ADDR "192.168.1.75"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
 #define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
@@ -422,7 +423,7 @@ void tcp_clientTask(void *pvParameters)
 		if (now-gl_last_send_time < TIME_PERIOD/1000)
 			vTaskDelay(pdMS_TO_TICKS(1000*(now-gl_last_send_time)));
 		do { 
-			do_ping_cmd("narodmon.com");
+			do_ping_cmd("192.168.1.75");
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
 		} while(!gl_ping); //Ждём пинга
@@ -509,8 +510,16 @@ void timeTask(void *pvParameters)
 		strftime(time_str, sizeof(time_str), "%H_%M_%S", &timeinfo);
 		
 		char payload[15];
-		snprintf(payload, sizeof(payload), "Time:%s", time_str);
-		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+		if (timeinfo.tm_year > 2025-1900) {
+			snprintf(payload, sizeof(payload), "Time:%s", time_str);
+			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+		}
+		else {
+			snprintf(payload, sizeof(payload), "Time:Not sync");
+			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+    	    esp_sntp_stop();
+    	    esp_sntp_init(); 
+		}
 		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TIME));
 	}
 }

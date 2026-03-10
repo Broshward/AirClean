@@ -610,6 +610,9 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		    esp_netif_dhcpc_start(netif); // Снова включаем автополучение
 		    ESP_LOGI("NVS", "Режим DHCP восстановлен");
 		}
+		if (strcmp(cmd, "RESET") == 0) { // Program reset
+			esp_restart();
+		}
 
 	    free(cmd);
 	    break;
@@ -691,12 +694,5 @@ void app_main(void)
 	sntp_init_and_sync();
 
 	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
-//	time_t now;
-//	while(1){
-//		time(&now);
-//		printf("========= Time: %d\n", (int)now);
-//		printf("========= Time: %s\n", ctime(&now));
-//		vTaskDelay(pdMS_TO_TICKS(10000));
-//	}
 
 }
