@@ -27,11 +27,11 @@ def start_server():
                     if last_received_time != 0 and interval < 60:
                         # Если прошло меньше 60 секунд
                         error_msg = f"INTERVAL {int(interval)}s < 1m"
-                        print(f"[{time_stamp}] Ошибка от {addr}: {error_msg}")
+                        print(f"[{time_stamp}] Ошибка от {addr}: {error_msg}\n")
                         conn.sendall(error_msg.encode())
                     else:
                         # Если всё в порядке
-                        print(f"[{time_stamp}] Принято от {addr}: {data.strip()}")
+                        print(f"[{time_stamp}] Принято от {addr}:\n{data.strip()}")
                         conn.sendall(b"OK")
                         last_received_time = current_time
 
