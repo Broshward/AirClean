@@ -1,31 +1,26 @@
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <errno.h>
+#include <netdb.h>            // struct addrinfo
+#include <arpa/inet.h>
+#include "esp_mac.h"
+#include "esp_wifi.h"
+#include "driver/temperature_sensor.h"
+
 #include "tasks.h"
 #include "blufi.h"
 #include "sntp.h"
 #include "ping.h"
 #include "i2c_MCP9800.h"
-
-#include <math.h>
-#include "esp_attr.h"
-#include "esp_blufi_api.h"
-#include "esp_sntp.h"
-
-
-
-#include <stdio.h>
-#include <string.h>
-#include "sdkconfig.h"
-#include "lwip/inet.h"
-#include "lwip/netdb.h"
-#include "lwip/sockets.h"
-#include "esp_event.h"
-#include "nvs_flash.h"
-#include "driver/temperature_sensor.h"
 #include "oneshot_read_adc_main.c"
 
 uint8_t gl_temperature[2];
 
 
-/*ADC temperature sensor Task*/
+/*ADC Light sensor Task*/
 #define CONFIG_LIGHT_ADC_PERIOD 1000*1			//Период измерения
 #define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*10	//Период передачи показаний
 float gl_luminosity;
@@ -126,26 +121,6 @@ void Temp_sensor_Task(void * pvParameters)
 		vTaskDelay(pdMS_TO_TICKS(TEMP_PERIOD));
 	}
 }
-
-/*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-#include "sdkconfig.h"
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <errno.h>
-#include <netdb.h>            // struct addrinfo
-#include <arpa/inet.h>
-#include "esp_netif.h"
-#include "esp_log.h"
-#include "esp_mac.h"
-#include "esp_wifi.h"
-#if defined(CONFIG_EXAMPLE_SOCKET_IP_INPUT_STDIN)
-#include "addr_from_stdin.h"
-#endif
 
 static const char *TCP_TAG = "TCP_IP";
 
@@ -306,8 +281,7 @@ void timeTask(void *pvParameters)
 			snprintf(payload, sizeof(payload), "Time:Not sync");
 			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			ESP_LOGI("Time", "Resync time");
-    	    esp_sntp_stop();
-    	    esp_sntp_init(); 
+			resync_time();
 		}
 		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TIME));
 	}

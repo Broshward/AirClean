@@ -1,8 +1,4 @@
-#include <stdio.h>
-#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
 
 #include "i2c_MCP9800.h"
 

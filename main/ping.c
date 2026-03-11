@@ -1,8 +1,8 @@
 #include "ping/ping_sock.h"
 #include "esp_check.h"
-#include "esp_netif.h"
 #include "driver/gpio.h"
 #include "lwip/netdb.h"
+
 const static char *PING_TAG = "PING:";
 bool gl_ping=0;
 time_t gl_time=0;
