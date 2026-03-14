@@ -9,6 +9,7 @@
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "driver/temperature_sensor.h"
+#include "driver/gpio.h"
 
 #include "tasks.h"
 #include "blufi.h"
@@ -16,6 +17,7 @@
 #include "ping.h"
 #include "i2c_MCP9800.h"
 #include "oneshot_read_adc_main.c"
+#include "spi.h"
 
 uint8_t gl_temperature[2];
 
@@ -155,6 +157,15 @@ void create_data(char *data)
 	sprintf(data+strlen(data),"##");
 }
 
+void after_success()
+{
+//	gpio_set_level(BLINK_GPIO, 0); // LED is on
+}
+void after_failure()
+{
+//	gpio_set_level(BLINK_GPIO, 1); // LED is off
+}
+
 //#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
 #define HOST_IP_ADDR "192.168.1.75"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
@@ -181,8 +192,10 @@ void tcp_clientTask(void *pvParameters)
 		time(&now);
 		printf("Time NOW: %d\n", (int)now);
 		printf("Time of last send: %d\n", (int)gl_last_send_time);
-		if (now-gl_last_send_time < TIME_PERIOD/1000)
+		if (now-gl_last_send_time < TIME_PERIOD/1000) {
+			printf("Time to wait : %d second\n", (int)(TIME_PERIOD-1000*(now-gl_last_send_time))/1000);
 			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
+		}
 		do { 
 			do_ping_cmd(HOST_IP_ADDR);
 #define PING_PERIOD 1000*2
@@ -204,6 +217,7 @@ void tcp_clientTask(void *pvParameters)
 		sock =  socket(addr_family, SOCK_STREAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TCP_TAG, "Unable to create socket: errno %d", errno);
+			after_failure();
             continue;
         }
         ESP_LOGI(TCP_TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
@@ -211,6 +225,7 @@ void tcp_clientTask(void *pvParameters)
         int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
             ESP_LOGE(TCP_TAG, "Socket unable to connect: errno %d", errno);
+			after_failure();
             continue;
         }
         ESP_LOGI(TCP_TAG, "Successfully connected");
@@ -223,15 +238,18 @@ void tcp_clientTask(void *pvParameters)
 			err = send(sock, data, strlen(data), 0);
             if (err < 0) {
                 ESP_LOGE(TCP_TAG, "Error occurred during sending: errno %d", errno);
+				after_failure();
 				continue;
             }
+
 // Recieve part for server ansvers
-#define TIMEOUT 1000*1 
+#define TIMEOUT 1000*1
 			vTaskDelay(pdMS_TO_TICKS(TIMEOUT)); // Timeout for server reply
             int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
             // Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TCP_TAG, "recv failed: errno %d", errno);
+				after_failure();
 				continue;
             }
             // Data received
@@ -241,18 +259,21 @@ void tcp_clientTask(void *pvParameters)
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
 				if (strcmp(rx_buffer,"OK")) 
 					while(1){
+						void after_failure();
 						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
 						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
 					}
 				else{
 					time(&gl_last_send_time);  //Set last send to server time
 					save_last_send_time(gl_last_send_time); // Write last send time to flash
+					after_success();
 				}
 				
             }
-			printf("----------------------------------------------------------------------\n");
+			//printf("----------------------------------------------------------------------\n");
+			ESP_LOGI(TCP_TAG, "----------");
 
-			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
+			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
     }
 }
 
@@ -285,4 +306,22 @@ void timeTask(void *pvParameters)
 		}
 		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TIME));
 	}
+}
+
+void spi_test(void *pvParameters)
+{
+	init_spi_eeprom();
+		time_t now;
+	for (int i=0; i<100; i++){
+		time(&now);
+		printf("w:%d\n",(int)now);
+		eeprom_write_timestamp(i*4,now);
+		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+	for (int i=0; i<100; i++){
+		printf("r:%d\n",(int)eeprom_read_timestamp(i*4));
+		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+	while(1)
+		vTaskDelay(pdMS_TO_TICKS(1000));
 }

@@ -693,5 +693,6 @@ void app_main(void)
 	sntp_init_and_sync();
 
 	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
+	xTaskCreate( spi_test, "SPI test", 10000, NULL, 1, NULL); //Task for test SPI
 
 }

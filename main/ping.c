@@ -3,6 +3,8 @@
 #include "driver/gpio.h"
 #include "lwip/netdb.h"
 
+#include "ping.h"
+
 const static char *PING_TAG = "PING:";
 bool gl_ping=0;
 time_t gl_time=0;
@@ -63,7 +65,6 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
 //#endif
     ESP_LOGI(PING_TAG, "%" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, time %" PRIu32 "ms\n",
            transmitted, received, loss, total_time_ms);
-#define BLINK_GPIO 8
 	if(received==0) {
 		gl_ping=false;
 		gpio_set_level(BLINK_GPIO, 1);
