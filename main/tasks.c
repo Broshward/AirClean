@@ -311,17 +311,16 @@ void timeTask(void *pvParameters)
 void spi_test(void *pvParameters)
 {
 	init_spi_eeprom();
-		time_t now;
-	for (int i=0; i<100; i++){
+	int i=0;
+	time_t now;
+//eeprom_erase_range(i, 256); 
+	while(1){
 		time(&now);
-		printf("w:%d\n",(int)now);
-		eeprom_write_timestamp(i*4,now);
-		vTaskDelay(pdMS_TO_TICKS(100));
-	}
-	for (int i=0; i<100; i++){
-		printf("r:%d\n",(int)eeprom_read_timestamp(i*4));
-		vTaskDelay(pdMS_TO_TICKS(100));
-	}
-	while(1)
+			printf("%x\n",(int)now);
+//		eeprom_write_u32(i,now);
+			printf("%x\n",(int)eeprom_read_u32(i));
+		printf("\n");
 		vTaskDelay(pdMS_TO_TICKS(1000));
+		i+=4;
+	}
 }
