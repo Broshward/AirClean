@@ -14,6 +14,7 @@
 
 #include "tasks.h"
 #include "sntp.h"
+#include "ota.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -610,6 +611,12 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		    esp_netif_dhcpc_start(netif); // Снова включаем автополучение
 		    ESP_LOGI("NVS", "Режим DHCP восстановлен");
 		}
+	    if (strcmp(cmd, "START_OTA") == 0) {
+	        ESP_LOGI("OTA", " Запуск обновления...");
+	        // Вызываем функцию обновления (код был выше)
+	        run_ota_update(); 
+	    }
+
 		if (strcmp(cmd, "RESET") == 0) { // Program reset
 			esp_restart();
 		}

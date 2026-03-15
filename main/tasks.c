@@ -47,7 +47,7 @@ void LightTask(void *pvParameters)
 
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value, &voltage));
 
-			gl_luminosity = pow(10,((float)voltage-250.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+			gl_luminosity = pow(10,((float)voltage-253.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
             //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 			
 			if (count == CONFIG_LIGHT_TRANSMIT_PERIOD/CONFIG_LIGHT_ADC_PERIOD){
@@ -315,11 +315,11 @@ void spi_test(void *pvParameters)
 	time_t now;
 //eeprom_erase_range(i, 256); 
 	while(1){
-		time(&now);
-			printf("%x\n",(int)now);
+//		time(&now);
+//			printf("%x\n",(int)now);
 //		eeprom_write_u32(i,now);
-			printf("%x\n",(int)eeprom_read_u32(i));
-		printf("\n");
+//			printf("%x\n",(int)eeprom_read_u32(i));
+		//printf("Hello World!!!\n");
 		vTaskDelay(pdMS_TO_TICKS(1000));
 		i+=4;
 	}
