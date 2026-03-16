@@ -614,7 +614,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 	    if (strcmp(cmd, "START_OTA") == 0) {
 	        ESP_LOGI("OTA", " Запуск обновления...");
 	        // Вызываем функцию обновления (код был выше)
-	        run_ota_update(); 
+	        run_ota_update_secure(); 
 	    }
 
 		if (strcmp(cmd, "RESET") == 0) { // Program reset
