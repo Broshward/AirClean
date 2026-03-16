@@ -18,6 +18,7 @@
 #include "i2c_MCP9800.h"
 #include "oneshot_read_adc_main.c"
 #include "spi.h"
+#include "ota.h"
 
 uint8_t gl_temperature[2];
 
@@ -320,7 +321,8 @@ void spi_test(void *pvParameters)
 //		eeprom_write_u32(i,now);
 //			printf("%x\n",(int)eeprom_read_u32(i));
 		//printf("Hello World!!!\n");
-		vTaskDelay(pdMS_TO_TICKS(1000));
+		check_and_run_ota();
+		vTaskDelay(pdMS_TO_TICKS(60000));
 		i+=4;
 	}
 }

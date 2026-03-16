@@ -1,6 +1,8 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_crt_bundle.h"
+#include "esp_app_format.h"
+#include "esp_ota_ops.h"
 
 #define UPDATE_SERVER "https://192.168.1.75:8284/build/blufi_demo.bin"
 
@@ -68,3 +70,40 @@ void run_ota_update()
         ESP_LOGE("OTA", "Ошибка обновления!");
     }
 }
+
+void check_and_run_ota() 
+{
+    // 1. Получаем текущую версию прошивки
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    ESP_LOGI("OTA", "Текущая версия: %s", app_desc->version);
+
+    // 2. Скачиваем version.txt с сервера (через обычный http_client)
+    char remote_version[32] = {0};
+    esp_http_client_config_t v_config = {
+        .url = "https://192.168.1.75:8284/version.txt",
+        .cert_pem = server_cert,
+        .skip_cert_common_name_check = true,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&v_config);
+    
+    if (esp_http_client_open(client, 0) == ESP_OK) {
+        esp_http_client_fetch_headers(client);
+        esp_http_client_read(client, remote_version, sizeof(remote_version));
+        esp_http_client_close(client);
+    }
+    esp_http_client_cleanup(client);
+	remote_version[strlen(remote_version)-1]=0; // Удаляем последний символ '\n'
+    // 3. Сравниваем (простая проверка строк)
+    if (strlen(remote_version) > 0 && strcmp(app_desc->version, remote_version) != 0) {
+        ESP_LOGI("OTA", "Найдена новая версия: %s. Обновляюсь...", remote_version);
+		printf("%s",remote_version);
+		printf("%s",app_desc->version);
+		printf("\n");
+
+//        run_ota_update_secure(); // Твоя функция HTTPS OTA
+    } else {
+        ESP_LOGI("OTA", "У вас актуальная версия. Обновление не требуется.");
+    }
+}
+
+
