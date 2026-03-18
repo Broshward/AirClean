@@ -12,7 +12,10 @@ extern i2c_master_dev_handle_t RTC_handle;
 
 void i2c_init();
 void config_MCP9800();
-esp_err_t register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len);
+esp_err_t i2c_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len);
+esp_err_t i2c_register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data);
+esp_err_t i2c_buffer_read(i2c_master_dev_handle_t dev_handle, uint8_t addr, uint8_t *data, size_t len);
+esp_err_t i2c_buffer_write(i2c_master_dev_handle_t dev_handle, uint8_t *data, size_t len);
 float temperature_calc(uint8_t *data);
 //esp_err_t register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len);
 

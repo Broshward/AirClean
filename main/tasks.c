@@ -78,11 +78,11 @@ void I2C_Task(void *pvParameters)
 {
 	config_MCP9800();
 	//Read configuration
-    register_read(MCP9800_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
+    i2c_register_read(MCP9800_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
     ESP_LOGI("i2c", "Configuration register = 0x%X", gl_temperature[0]);
 
 	while(1){
-		register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
+		i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
 		//ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
 
 		// Отправка через BluFi
@@ -309,7 +309,7 @@ void spi_test(void *pvParameters)
 	int i=0;
 	//time_t now;
 	while(1){
-		rtc_to_system_time();
+	//	rtc_to_system_time();
 		vTaskDelay(pdMS_TO_TICKS(10000));
 		i+=4;
 	}

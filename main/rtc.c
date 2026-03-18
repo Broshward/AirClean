@@ -13,12 +13,7 @@ static uint8_t dec2bcd(uint8_t val) { return ((val / 10) << 4) | (val % 10); }
 void rtc_to_system_time() 
 {
     uint8_t data[7]={0,0,0,0,0,0,0};
-	for (int i=0; i<7; i++)
-		printf("RTC data[%d] = %x\n",i,data[i]);
-	printf("\n");
-    i2c_master_transmit_receive(RTC_handle, (uint8_t[]){0x00}, 1, data, 7, pdMS_TO_TICKS(100));
-	for (int i=0; i<7; i++)
-		printf("RTC data[%d] = %x\n",i,data[i]);
+	i2c_register_read(RTC_handle, 0, data, 7);
 
     struct tm tm;
     tm.tm_sec = bcd2dec(data[0] & 0x7F);
@@ -31,6 +26,7 @@ void rtc_to_system_time()
     time_t t = mktime(&tm);
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL);
+	time(&t);
     ESP_LOGI("RTC", "Время установлено из MCP79410");
 }
 
@@ -43,7 +39,7 @@ void system_time_to_rtc()
     localtime_r(&now, &tm);
 
     uint8_t data[8] = {
-   //     0x00, // Начальный регистр
+        0x00, // Начальный регистр(адрес)
         dec2bcd(tm.tm_sec) | 0x80, // Бит ST (Start Oscillator) = 1
         dec2bcd(tm.tm_min),
         dec2bcd(tm.tm_hour),
@@ -52,8 +48,7 @@ void system_time_to_rtc()
         dec2bcd(tm.tm_mon + 1),
         dec2bcd(tm.tm_year - 100)
     };
-    i2c_master_transmit(RTC_handle, data, sizeof(data), pdMS_TO_TICKS(100));
+	i2c_buffer_write(RTC_handle, data, 8);
+
     ESP_LOGI("RTC", "Время синхронизировано в MCP79410");
-	for (int i=0; i<7; i++)
-		printf("RTC data[%d] = %x\n",i,data[i]);
 }

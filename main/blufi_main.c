@@ -696,7 +696,7 @@ void app_main(void)
     i2c_init();
 
 	//Sincing time
-//	rtc_to_system_time();
+	rtc_to_system_time();
 	sntp_init_and_sync();
 
 	xTaskCreate( Temp_sensor_Task, "TempSensor", 10000, NULL, 1, NULL);
@@ -706,7 +706,7 @@ void app_main(void)
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
 	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task); //Task for WiFi reconnect
 
-//	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
+	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
 	xTaskCreate( spi_test, "SPI test", 10000, NULL, 1, NULL); //Task for test SPI
 
 }

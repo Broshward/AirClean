@@ -6,7 +6,7 @@
 #define I2C_MASTER_SCL_IO           9 //CONFIG_I2C_MASTER_SCL       /*!< GPIO number used for I2C master clock */
 #define I2C_MASTER_SDA_IO           2  //CONFIG_I2C_MASTER_SDA       /*!< GPIO number used for I2C master data  */
 #define I2C_MASTER_NUM              I2C_NUM_0                   /*!< I2C port number for master dev */
-#define I2C_MASTER_FREQ_HZ          100000 //CONFIG_I2C_MASTER_FREQUENCY /*!< I2C master clock frequency */
+#define I2C_MASTER_FREQ_HZ          10000 //CONFIG_I2C_MASTER_FREQUENCY /*!< I2C master clock frequency */
 #define I2C_MASTER_TX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 #define I2C_MASTER_RX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 
@@ -14,12 +14,22 @@ i2c_master_dev_handle_t MCP9800_handle;
 i2c_master_dev_handle_t RTC_handle;
 i2c_master_bus_handle_t i2c_handle;
 
-esp_err_t register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
+esp_err_t i2c_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
 {
     return i2c_master_transmit_receive(dev_handle, &reg_addr, 1, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
 
-esp_err_t register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data)
+esp_err_t i2c_buffer_read(i2c_master_dev_handle_t dev_handle, uint8_t addr, uint8_t *data, size_t len)
+{
+    return i2c_master_transmit_receive(dev_handle, &addr, 1, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+}
+
+esp_err_t i2c_buffer_write(i2c_master_dev_handle_t dev_handle, uint8_t *data, size_t len)
+{
+    return i2c_master_transmit(dev_handle, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+}
+
+esp_err_t i2c_register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data)
 {
     uint8_t write_buf[2] = {reg_addr, data};
     return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
@@ -58,7 +68,7 @@ void i2c_init()
 {
     i2c_master_init(&i2c_handle);
 	i2c_dev_init(&i2c_handle, MCP9800_SENSOR_ADDR, &MCP9800_handle);
-	i2c_dev_init(&i2c_handle, MCP9800_SENSOR_ADDR, &RTC_handle);
+	i2c_dev_init(&i2c_handle, RTC_ADDRESS, &RTC_handle);
 }
 
 #define CONFIG_REGISTER_VALUE		(0b11<<5)
@@ -66,7 +76,7 @@ void i2c_init()
 void config_MCP9800()
 {
 	//Write configuration
-    register_write_byte(MCP9800_handle, MCP9800_CONFIG_REG, CONFIG_REGISTER_VALUE); //12-bit resolution
+    i2c_register_write_byte(MCP9800_handle, MCP9800_CONFIG_REG, CONFIG_REGISTER_VALUE); //12-bit resolution
 }
 
 float temperature_calc(uint8_t *data)
