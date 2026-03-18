@@ -15,10 +15,11 @@
 #include "blufi.h"
 #include "sntp.h"
 #include "ping.h"
-#include "i2c_MCP9800.h"
+#include "i2c.h"
 #include "oneshot_read_adc_main.c"
 #include "spi.h"
 #include "ota.h"
+#include "rtc.h"
 
 uint8_t gl_temperature[2];
 
@@ -72,23 +73,16 @@ void LightTask(void *pvParameters)
     }
 }
 
-const char *I2C_TAG = "i2c";
 #define CONFIG_TEMP_PERIOD 10000 //10 sec
 void I2C_Task(void *pvParameters)
 {
-	i2c_master_bus_handle_t bus_handle;
-	i2c_master_dev_handle_t dev_handle;
-
-    i2c_master_init(&bus_handle, &dev_handle);
-    ESP_LOGI(I2C_TAG, "I2C initialized successfully");
-
 	config_MCP9800();
 	//Read configuration
-    register_read(dev_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
-    ESP_LOGI(I2C_TAG, "Configuration register = 0x%X", gl_temperature[0]);
+    register_read(MCP9800_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
+    ESP_LOGI("i2c", "Configuration register = 0x%X", gl_temperature[0]);
 
 	while(1){
-		register_read(dev_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
+		register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
 		//ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
 
 		// Отправка через BluFi
@@ -313,9 +307,10 @@ void spi_test(void *pvParameters)
 {
 	init_spi_eeprom();
 	int i=0;
-	time_t now;
+	//time_t now;
 	while(1){
-		vTaskDelay(pdMS_TO_TICKS(60000));
+		rtc_to_system_time();
+		vTaskDelay(pdMS_TO_TICKS(10000));
 		i+=4;
 	}
 }
