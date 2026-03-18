@@ -4,11 +4,22 @@
 
 #include "sntp.h"
 
+// Сама функция, которая сработает при успехе
+static void time_sync_notification_cb(struct timeval *tv) {
+    ESP_LOGI("SNTP", "Синхронизация с сервером времени прошла успешно!");
+    
+    // Как только время стало актуальным — сразу записываем его в наши часы RTC
+//    system_time_to_rtc(); 
+}
+
 void sntp_init_and_sync() 
 {
     ESP_LOGI("SNTP", "Инициализация SNTP...");
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org"); // Можно добавить несколько серверов
+	
+    // Регистрируем наш колбэк
+    esp_sntp_set_time_sync_notification_cb(time_sync_notification_cb);
     esp_sntp_init();
 
     // Установка часового пояса (например, Москва UTC+3)
