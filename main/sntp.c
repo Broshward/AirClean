@@ -3,13 +3,14 @@
 #include "esp_sntp.h"
 
 #include "sntp.h"
+#include "rtc.h"
 
 // Сама функция, которая сработает при успехе
-static void time_sync_notification_cb(struct timeval *tv) {
+void time_sync_notification_cb(struct timeval *tv) {
     ESP_LOGI("SNTP", "Синхронизация с сервером времени прошла успешно!");
     
     // Как только время стало актуальным — сразу записываем его в наши часы RTC
-//    system_time_to_rtc(); 
+    system_time_to_rtc(); 
 }
 
 void sntp_init_and_sync() 

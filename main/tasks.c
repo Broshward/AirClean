@@ -314,14 +314,7 @@ void spi_test(void *pvParameters)
 	init_spi_eeprom();
 	int i=0;
 	time_t now;
-//eeprom_erase_range(i, 256); 
 	while(1){
-//		time(&now);
-//			printf("%x\n",(int)now);
-//		eeprom_write_u32(i,now);
-//			printf("%x\n",(int)eeprom_read_u32(i));
-		//printf("Hello World!!!\n");
-		check_and_run_ota();
 		vTaskDelay(pdMS_TO_TICKS(60000));
 		i+=4;
 	}

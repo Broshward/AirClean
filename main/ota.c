@@ -4,7 +4,7 @@
 #include "esp_app_format.h"
 #include "esp_ota_ops.h"
 
-#define UPDATE_SERVER "https://192.168.1.75:8284/build/blufi_demo.bin"
+#define UPDATE_SERVER "192.168.1.75"
 
 // Эти переменные создаются автоматически благодаря target_add_binary_data
 extern const uint8_t server_cert_pem_start[] asm("_binary_server_cert_pem_start");
@@ -25,7 +25,7 @@ const char* server_cert = "-----BEGIN CERTIFICATE-----\n"
 void run_ota_update_secure() 
 {
     esp_http_client_config_t config = {
-        .url = UPDATE_SERVER, // Теперь HTTPS
+        .url = "https://"UPDATE_SERVER":8284/build/blufi_demo.bin", // Теперь HTTPS
         .cert_pem = server_cert, // Указатель на вшитый сертификат
     .skip_cert_common_name_check = true, // Обязательно для самоподписанных!
     .transport_type = HTTP_TRANSPORT_OVER_SSL,
@@ -51,7 +51,7 @@ void run_ota_update_secure()
 void run_ota_update() 
 {
     esp_http_client_config_t config = {
-        .url = UPDATE_SERVER, 
+        .url = "http://"UPDATE_SERVER":8285/build/blufi_demo.bin", 
 	//	.port = 8284,
         .timeout_ms = 5000,
         .keep_alive_enable = true,		
@@ -80,7 +80,7 @@ void check_and_run_ota()
     // 2. Скачиваем version.txt с сервера (через обычный http_client)
     char remote_version[32] = {0};
     esp_http_client_config_t v_config = {
-        .url = "https://192.168.1.75:8284/version.txt",
+        .url = "https://"UPDATE_SERVER":8284/version.txt",
         .cert_pem = server_cert,
         .skip_cert_common_name_check = true,
     };

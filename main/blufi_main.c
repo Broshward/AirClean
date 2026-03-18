@@ -15,6 +15,7 @@
 #include "tasks.h"
 #include "sntp.h"
 #include "ota.h"
+#include "rtc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -615,6 +616,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 	        ESP_LOGI("OTA", " Запуск обновления...");
 	        // Вызываем функцию обновления (код был выше)
 	        run_ota_update_secure(); 
+	        //run_ota_update(); 
 	    }
 
 		if (strcmp(cmd, "RESET") == 0) { // Program reset
@@ -697,6 +699,7 @@ void app_main(void)
 	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task); //Task for WiFi reconnect
 
 	//Sincing time
+	rtc_to_system_time();
 	sntp_init_and_sync();
 
 	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for ntp 
