@@ -98,6 +98,27 @@ TaskHandle_t tcptask;
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
 
+void save_tz_to_nvs(int8_t offset) 
+{
+    nvs_handle_t h;
+    if (nvs_open("storage", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i8(h, "tz_offset", offset);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+int8_t load_tz_from_nvs() 
+{
+    nvs_handle_t h;
+    int8_t offset = 3; // По умолчанию Москва
+    if (nvs_open("storage", NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_i8(h, "tz_offset", &offset);
+        nvs_close(h);
+    }
+    return offset;
+}
+
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
     nvs_handle_t my_handle;
@@ -618,6 +639,17 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 			send_last_sync_sntp();
 		}
 
+		if (strncmp(cmd, "SET_TZ:", 7) == 0) {
+			int offset = atoi(cmd + 7);
+			save_tz_to_nvs(offset);
+			set_timezone(offset);
+			
+			// После смены пояса нужно обновить время в RTC, 
+			// так как системное время изменилось!
+			system_time_to_rtc();
+		}
+
+
 	    if (strcmp(cmd, "START_OTA") == 0) {
 	        ESP_LOGI("OTA", " Запуск обновления...");
 	        // Вызываем функцию обновления (код был выше)
@@ -701,7 +733,7 @@ void app_main(void)
     i2c_init();
 
     // Установка часового пояса (например, Москва UTC+3)
-	set_timezone(3); //Москва - 3
+	set_timezone(load_tz_from_nvs()); //Москва - 3
 
 	//Sincing time
 	rtc_to_system_time();
