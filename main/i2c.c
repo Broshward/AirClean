@@ -6,7 +6,7 @@
 #define I2C_MASTER_SCL_IO           9 //CONFIG_I2C_MASTER_SCL       /*!< GPIO number used for I2C master clock */
 #define I2C_MASTER_SDA_IO           2  //CONFIG_I2C_MASTER_SDA       /*!< GPIO number used for I2C master data  */
 #define I2C_MASTER_NUM              I2C_NUM_0                   /*!< I2C port number for master dev */
-#define I2C_MASTER_FREQ_HZ          10000 //CONFIG_I2C_MASTER_FREQUENCY /*!< I2C master clock frequency */
+#define I2C_MASTER_FREQ_HZ          100000 //CONFIG_I2C_MASTER_FREQUENCY /*!< I2C master clock frequency */
 #define I2C_MASTER_TX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 #define I2C_MASTER_RX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 
@@ -24,6 +24,7 @@ esp_err_t i2c_buffer_read(i2c_master_dev_handle_t dev_handle, uint8_t addr, uint
     return i2c_master_transmit_receive(dev_handle, &addr, 1, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
 
+//The first register of buffer is address of first register
 esp_err_t i2c_buffer_write(i2c_master_dev_handle_t dev_handle, uint8_t *data, size_t len)
 {
     return i2c_master_transmit(dev_handle, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);

@@ -29,6 +29,7 @@ def start_server():
                         error_msg = f"INTERVAL {int(interval)}s < 1m"
                         print(f"[{time_stamp}] Ошибка от {addr}: {error_msg}\n")
                         conn.sendall(error_msg.encode())
+                        last_received_time = current_time
                     else:
                         # Если всё в порядке
                         print(f"[{time_stamp}] Принято от {addr}:\n{data.strip()}")

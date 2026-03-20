@@ -9,7 +9,7 @@ void remote_log(const char *fmt, ...)
     va_end(args);
 
     struct sockaddr_in dest_addr;
-    dest_addr.sin_addr.s_addr = inet_addr("192.168.1.75"); // IP ноута
+    dest_addr.sin_addr.s_addr = inet_addr("192.168.43.105"); // IP ноута
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(5273);
 

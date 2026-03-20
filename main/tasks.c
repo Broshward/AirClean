@@ -162,7 +162,7 @@ void after_failure()
 }
 
 //#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
-#define HOST_IP_ADDR "192.168.1.75"						// Debug IP-address
+#define HOST_IP_ADDR "192.168.43.105"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
 #define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
@@ -272,34 +272,37 @@ void tcp_clientTask(void *pvParameters)
     }
 }
 
-#define TIME_SEND_TIME 1000*10 //3600
+#define TIME_TO_TIME 1000*60 //3600
 void timeTask(void *pvParameters)
 {
 	bool tcp_notify_given=false; //Эта переменная нужна, чтобы задача не надоедала уведомлениями
 	while(1){
+		rtc_to_system_time(); // Синхронизируем с внутренними часами каждые TIME_TO_TIME
 		time_t now;
-		struct tm timeinfo;
 		time(&now);
+		printf("Time = %d\n", (int)now);
+
+		char payload[35];
+		char timestr[20];
+		struct tm timeinfo;
 		localtime_r(&now, &timeinfo);
-		char time_str[10];
-		strftime(time_str, sizeof(time_str), "%H_%M_%S", &timeinfo);
-	
-		char payload[15];
+		strftime(timestr, sizeof(timestr), "%H_%M_%S %d-%m-%Y", &timeinfo);
+		snprintf(payload, sizeof(payload), "Time:%s", timestr);
+		printf(payload);
+		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 		if (timeinfo.tm_year > 2025-1900) {
-			snprintf(payload, sizeof(payload), "Time:%s", time_str);
-			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			if (tcp_notify_given==false){
 				xTaskNotifyGive(tcptask);
 				tcp_notify_given=true;
 			}
 		}
 		else {
-			snprintf(payload, sizeof(payload), "Time:Not sync");
+			snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
 			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			ESP_LOGI("Time", "Resync time");
 			resync_time();
 		}
-		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TIME));
+		vTaskDelay(pdMS_TO_TICKS(TIME_TO_TIME));
 	}
 }
 

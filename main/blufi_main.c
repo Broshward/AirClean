@@ -389,6 +389,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         ble_is_connected = true;
         esp_blufi_adv_stop();
         blufi_security_init();
+		//-----------------
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         BLUFI_INFO("BLUFI ble disconnect\n");
@@ -613,6 +614,10 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		    esp_netif_dhcpc_start(netif); // Снова включаем автополучение
 		    ESP_LOGI("NVS", "Режим DHCP восстановлен");
 		}
+	    if (strcmp(cmd, "GET_SYNC_TIME") == 0) {
+			send_last_sync_sntp();
+		}
+
 	    if (strcmp(cmd, "START_OTA") == 0) {
 	        ESP_LOGI("OTA", " Запуск обновления...");
 	        // Вызываем функцию обновления (код был выше)
@@ -694,6 +699,9 @@ void app_main(void)
 
 	// i2c init
     i2c_init();
+
+    // Установка часового пояса (например, Москва UTC+3)
+	set_timezone(3); //Москва - 3
 
 	//Sincing time
 	rtc_to_system_time();

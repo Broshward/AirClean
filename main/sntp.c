@@ -1,44 +1,15 @@
+#include <time.h>
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "esp_sntp.h"
+#include "nvs_flash.h"
 
 #include "sntp.h"
 #include "rtc.h"
+#include "blufi.h"
 
-// Сама функция, которая сработает при успехе
-void time_sync_notification_cb(struct timeval *tv) {
-    ESP_LOGI("SNTP", "Синхронизация с сервером времени прошла успешно!");
-    
-    // Как только время стало актуальным — сразу записываем его в наши часы RTC
-    system_time_to_rtc(); 
-}
+time_t last_sync_sntp=0;
 
-void sntp_init_and_sync() 
-{
-    ESP_LOGI("SNTP", "Инициализация SNTP...");
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org"); // Можно добавить несколько серверов
-	
-    // Регистрируем наш колбэк
-    esp_sntp_set_time_sync_notification_cb(time_sync_notification_cb);
-    esp_sntp_init();
-
-    // Установка часового пояса (например, Москва UTC+3)
-    setenv("TZ", "MSK-3", 1);
-    tzset();
-}
-
-// Функция для получения текущего времени в строку
-void get_current_time_str(char* buf, size_t size) 
-{
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-    strftime(buf, size, "%H:%M:%S", &timeinfo);
-}
-
-void save_last_send_time(uint32_t timestamp) 
+void save_last_sync_sntp(uint32_t timestamp) 
 {
     nvs_handle_t my_handle;
     // Открываем хранилище с именем "storage"
@@ -49,7 +20,7 @@ void save_last_send_time(uint32_t timestamp)
     }
 }
 
-uint32_t load_last_send_time() 
+uint32_t load_last_sync_sntp() 
 {
     nvs_handle_t my_handle;
     uint32_t timestamp = 0;
@@ -60,8 +31,42 @@ uint32_t load_last_send_time()
     return timestamp;
 }
 
+// Колбэк функция, которая сработает при успехе
+void time_sync_notification_cb(struct timeval *tv) {
+    ESP_LOGI("SNTP", "Синхронизация с сервером времени прошла успешно!");
+    
+	time(&last_sync_sntp);
+	save_last_sync_sntp(last_sync_sntp); //Сохраняем время синхронизации
+	send_last_sync_sntp();
+    // Как только время стало актуальным — сразу записываем его в наши часы RTC
+    system_time_to_rtc(); 
+}
+
+void sntp_init_and_sync() 
+{
+    ESP_LOGI("SNTP", "Инициализация SNTP...");
+	last_sync_sntp = load_last_sync_sntp(); // Загружаем время последней синхронизации
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org"); // Можно добавить несколько серверов
+	
+    // Регистрируем наш колбэк
+    esp_sntp_set_time_sync_notification_cb(time_sync_notification_cb);
+    esp_sntp_init();
+}
+
 void resync_time()
 {
 	esp_sntp_stop();
 	esp_sntp_init(); 
+}
+
+void send_last_sync_sntp()
+{
+	struct tm timeinfo;
+	localtime_r(&last_sync_sntp, &timeinfo);
+	char time_str[20];
+	strftime(time_str, sizeof(time_str), "%H_%M_%S %d-%m-%Y", &timeinfo);
+	char payload[35];
+	snprintf(payload, sizeof(payload), "Time_sync_sntp:%s", time_str);
+	esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 }

@@ -1,8 +1,9 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
-#include <time.h>
+#include "nvs_flash.h"
 #include <sys/time.h>
 
+#include "rtc.h"
 #include "i2c.h"
 
 // Вспомогательные функции BCD
@@ -23,11 +24,12 @@ void rtc_to_system_time()
     tm.tm_mon = bcd2dec(data[5] & 0x1F) - 1;
     tm.tm_year = bcd2dec(data[6]) + 100; // 2000 + год
 
+	// Установка времени
     time_t t = mktime(&tm);
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL);
-	time(&t);
     ESP_LOGI("RTC", "Время установлено из MCP79410");
+	//printf("TIME:%d\n",(int)t);
 }
 
 // Запись системного (NTP) времени в RTC
@@ -37,7 +39,6 @@ void system_time_to_rtc()
     struct tm tm;
     time(&now);
     localtime_r(&now, &tm);
-
     uint8_t data[8] = {
         0x00, // Начальный регистр(адрес)
         dec2bcd(tm.tm_sec) | 0x80, // Бит ST (Start Oscillator) = 1
@@ -51,4 +52,50 @@ void system_time_to_rtc()
 	i2c_buffer_write(RTC_handle, data, 8);
 
     ESP_LOGI("RTC", "Время синхронизировано в MCP79410");
+}
+
+// Функция для получения текущего времени в строку
+void get_current_time_str(char* buf, size_t size) 
+{
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    strftime(buf, size, "%H:%M:%S", &timeinfo);
+}
+
+void save_last_send_time(uint32_t timestamp) 
+{
+    nvs_handle_t my_handle;
+    // Открываем хранилище с именем "storage"
+    if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
+        nvs_set_u32(my_handle, "last_send", timestamp);
+        nvs_commit(my_handle); // Обязательно фиксируем изменения
+        nvs_close(my_handle);
+    }
+}
+
+uint32_t load_last_send_time() 
+{
+    nvs_handle_t my_handle;
+    uint32_t timestamp = 0;
+    if (nvs_open("storage", NVS_READONLY, &my_handle) == ESP_OK) {
+        nvs_get_u32(my_handle, "last_send", &timestamp);
+        nvs_close(my_handle);
+    }
+    return timestamp;
+}
+
+void set_timezone(int offset) 
+{
+    char tz_string[16];
+    // Формат POSIX: UTC-3 означает "на 3 часа ВПЕРЕД от Гринвича" (да, знаки там инвертированы)
+    // Но проще использовать формат: <ANY_NAME><-OFFSET>
+    // Если offset = 3 (Москва), то TZ будет "MSK-3"
+    snprintf(tz_string, sizeof(tz_string), "UTC%s%d", offset >= 0 ? "-" : "+", abs(offset));
+    
+    setenv("TZ", tz_string, 1);
+    tzset();
+    
+    ESP_LOGI("TIME", "Часовой пояс установлен: %s", tz_string);
 }
