@@ -13,9 +13,8 @@
 ****************************************************************************/
 
 #include "tasks.h"
-#include "sntp.h"
+#include "times.h"
 #include "ota.h"
-#include "rtc.h"
 #include "i2c.h"
 
 #include <stdio.h>
@@ -97,27 +96,6 @@ TaskHandle_t tcptask;
 
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
-
-void save_tz_to_nvs(int8_t offset) 
-{
-    nvs_handle_t h;
-    if (nvs_open("storage", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_i8(h, "tz_offset", offset);
-        nvs_commit(h);
-        nvs_close(h);
-    }
-}
-
-int8_t load_tz_from_nvs() 
-{
-    nvs_handle_t h;
-    int8_t offset = 3; // По умолчанию Москва
-    if (nvs_open("storage", NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_i8(h, "tz_offset", &offset);
-        nvs_close(h);
-    }
-    return offset;
-}
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
@@ -643,7 +621,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 			int offset = atoi(cmd + 7);
 			save_tz_to_nvs(offset);
 			set_timezone(offset);
-			
 			// После смены пояса нужно обновить время в RTC, 
 			// так как системное время изменилось!
 			system_time_to_rtc();
@@ -651,15 +628,13 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 
 		if (strcmp(cmd, "GET_TZ") == 0) {
 			char response[8];
-			// Добавляем режим в конец строки: IP|MASK|GW|MODE
 			snprintf(response, sizeof(response), "TZ:%d", (int)load_tz_from_nvs());
-			
 			esp_blufi_send_custom_data((uint8_t *)response, strlen(response));
 		}
 
 	    if (strcmp(cmd, "START_OTA") == 0) {
 	        ESP_LOGI("OTA", " Запуск обновления...");
-	        // Вызываем функцию обновления (код был выше)
+	        // Вызываем функцию обновления
 	        run_ota_update_secure(); 
 	        //run_ota_update(); 
 	    }

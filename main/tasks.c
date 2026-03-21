@@ -13,13 +13,12 @@
 
 #include "tasks.h"
 #include "blufi.h"
-#include "sntp.h"
+#include "times.h"
 #include "ping.h"
 #include "i2c.h"
 #include "oneshot_read_adc_main.c"
 #include "spi.h"
 #include "ota.h"
-#include "rtc.h"
 
 uint8_t gl_temperature[2];
 
