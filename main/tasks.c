@@ -286,9 +286,13 @@ void timeTask(void *pvParameters)
 		char timestr[20];
 		struct tm timeinfo;
 		localtime_r(&now, &timeinfo);
-		strftime(timestr, sizeof(timestr), "%H_%M_%S %d-%m-%Y", &timeinfo);
+		//Time
+		strftime(timestr, sizeof(timestr), "%H_%M_%S", &timeinfo);
 		snprintf(payload, sizeof(payload), "Time:%s", timestr);
-		printf(payload);
+		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+		//Date
+		strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
+		snprintf(payload, sizeof(payload), "Date:%s", timestr);
 		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 		if (timeinfo.tm_year > 2025-1900) {
 			if (tcp_notify_given==false){
