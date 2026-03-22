@@ -71,6 +71,8 @@ void send_last_sync_sntp()
 	char payload[35];
 	snprintf(payload, sizeof(payload), "Time_sync_sntp:%s", time_str);
 	esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+	snprintf(payload, sizeof(payload), "TZ:%d", (int)load_tz_from_nvs());
+	esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 }
 
 // Вспомогательные функции BCD

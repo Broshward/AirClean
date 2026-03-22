@@ -1,6 +1,7 @@
 idf_component_register(SRCS "blufi_main.c"
                             "blufi_security.c"
 							"oneshot_read_adc_main.c"
+							#"adc.c"
                             "blufi_init.c"
 							"tasks.c"
 							"times.c"

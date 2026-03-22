@@ -626,12 +626,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 			system_time_to_rtc();
 		}
 
-		if (strcmp(cmd, "GET_TZ") == 0) {
-			char response[8];
-			snprintf(response, sizeof(response), "TZ:%d", (int)load_tz_from_nvs());
-			esp_blufi_send_custom_data((uint8_t *)response, strlen(response));
-		}
-
 	    if (strcmp(cmd, "START_OTA") == 0) {
 	        ESP_LOGI("OTA", " Запуск обновления...");
 	        // Вызываем функцию обновления

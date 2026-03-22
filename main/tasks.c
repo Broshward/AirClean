@@ -24,8 +24,8 @@ uint8_t gl_temperature[2];
 
 
 /*ADC Light sensor Task*/
-#define CONFIG_LIGHT_ADC_PERIOD 1000*1			//Период измерения
-#define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*10	//Период передачи показаний
+#define CONFIG_LIGHT_ADC_PERIOD 10			//Период измерения
+#define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*5	//Период передачи показаний
 float gl_luminosity;
 
 void LightTask(void *pvParameters)
@@ -34,7 +34,7 @@ void LightTask(void *pvParameters)
 	// Переменная для хранения предыдущего значения
 	static int filtered_value;
 	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value); //Начальное значение 
-	const int coeff = 4; // Коэффициент фильтрации
+	const int coeff = 16; // Коэффициент фильтрации
 	int count=0;
     while (1) {
         if (do_calibration1_chan0) {
@@ -48,7 +48,7 @@ void LightTask(void *pvParameters)
 
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value, &voltage));
 
-			gl_luminosity = pow(10,((float)voltage-253.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+			gl_luminosity = pow(10,((float)voltage-255.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
             //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
 			
 			if (count == CONFIG_LIGHT_TRANSMIT_PERIOD/CONFIG_LIGHT_ADC_PERIOD){
