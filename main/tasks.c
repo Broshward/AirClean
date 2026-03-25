@@ -24,12 +24,20 @@ uint8_t gl_temperature[2];
 
 
 /*ADC Light sensor Task*/
-#define CONFIG_LIGHT_ADC_PERIOD 10			//Период измерения
-#define CONFIG_LIGHT_TRANSMIT_PERIOD 1000*5	//Период передачи показаний
+#define ADC_PERIOD 10			//Период измерения
+#define TRANSMIT_PERIOD 1000*5	//Период передачи показаний
 float gl_luminosity;
 
-void LightTask(void *pvParameters)
+void sensorsTask(void *pvParameters)
 {
+	config_MCP9800(); // Датчик температуры
+	
+	// CHip temperature sensor init
+	temperature_sensor_handle_t temp_handle = NULL;
+	temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 50);
+	ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_handle));
+
+	// Аналоговые датчики
 	adc_config();
 	// Переменная для хранения предыдущего значения
 	static int filtered_value;
@@ -49,11 +57,31 @@ void LightTask(void *pvParameters)
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value, &voltage));
 
 			gl_luminosity = pow(10,((float)voltage-255.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
-            //ESP_LOGI(ADC_TAG, "ADC Voltage = %d mV, Luminosity = %.2f Lux", voltage[0][0], gl_luminosity);
+        //ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &adc_raw[0][1]));
+        //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, adc_raw[0][1]);
+        //if (do_calibration1_chan1) {
+        //    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan1_handle, adc_raw[0][1], &voltage[0][1]));
+        //    ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage[0][1]);
+        //}
 			
-			if (count == CONFIG_LIGHT_TRANSMIT_PERIOD/CONFIG_LIGHT_ADC_PERIOD){
-				// Отправка через BluFi
+			// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
+			if (count == TRANSMIT_PERIOD/ADC_PERIOD){
+				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
 				char payload[40];
+				snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			
+				// Enable temperature sensor
+				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
+				// Get converted sensor data
+				float tsens_out;
+				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &tsens_out));
+				// Disable the temperature sensor if it is not needed and save the power
+				ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
+
+				snprintf(payload, sizeof(payload), "Chip_Temp:%.2f", tsens_out);
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			
 				snprintf(payload, sizeof(payload), "Lumin:%.2f", gl_luminosity);
 				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 				count=0;
@@ -61,61 +89,9 @@ void LightTask(void *pvParameters)
 			count++;
         }
 
-        //ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &adc_raw[0][1]));
-        //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, adc_raw[0][1]);
-        //if (do_calibration1_chan1) {
-        //    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan1_handle, adc_raw[0][1], &voltage[0][1]));
-        //    ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage[0][1]);
-        //}
         //vTaskDelay(pdMS_TO_TICKS(1000));
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_LIGHT_ADC_PERIOD));
+        vTaskDelay(pdMS_TO_TICKS(ADC_PERIOD));
     }
-}
-
-#define CONFIG_TEMP_PERIOD 10000 //10 sec
-void I2C_Task(void *pvParameters)
-{
-	config_MCP9800();
-	//Read configuration
-    i2c_register_read(MCP9800_handle, MCP9800_CONFIG_REG, gl_temperature, 1);
-    ESP_LOGI("i2c", "Configuration register = 0x%X", gl_temperature[0]);
-
-	while(1){
-		i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-		//ESP_LOGI(I2C_TAG, "Temperature = %.2f", temperature_calc(gl_temperature));
-
-		// Отправка через BluFi
-		char payload[40];
-		snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
-		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
-			
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_TEMP_PERIOD));
-	}
-
-}
-
-void Temp_sensor_Task(void * pvParameters)
-{
-	temperature_sensor_handle_t temp_handle = NULL;
-	temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 50);
-	ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_handle));
-	while(1){
-		// Enable temperature sensor
-		ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
-		// Get converted sensor data
-		float tsens_out;
-		ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &tsens_out));
-		// Disable the temperature sensor if it is not needed and save the power
-		ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
-
-		// Отправка через BluFi
-		char payload[20];
-		snprintf(payload, sizeof(payload), "Chip_Temp:%.2f", tsens_out);
-		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
-			
-#define TEMP_PERIOD 1000*10
-		vTaskDelay(pdMS_TO_TICKS(TEMP_PERIOD));
-	}
 }
 
 static const char *TCP_TAG = "TCP_IP";
@@ -161,7 +137,7 @@ void after_failure()
 }
 
 //#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
-#define HOST_IP_ADDR "192.168.43.105"						// Debug IP-address
+#define HOST_IP_ADDR "192.168.1.75"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
 #define TIME_PERIOD 1000*60 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
@@ -279,7 +255,7 @@ void timeTask(void *pvParameters)
 		rtc_to_system_time(); // Синхронизируем с внутренними часами каждые TIME_TO_TIME
 		time_t now;
 		time(&now);
-		printf("Time = %d\n", (int)now);
+		printf("Time = %u (0x%X)\n", (unsigned )now, (unsigned)now);
 
 		char payload[35];
 		char timestr[20];
