@@ -11,7 +11,7 @@ def start_server():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('0.0.0.0', 8283))
         s.listen(1)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Сервер запущен. Ожидание интервала > 60 сек.")
+        print(f"[{datetime.now().strftime('%H:%M:%S %d-%m-%Y')}] Сервер запущен. Ожидание интервала > 60 сек.")
 
         while True:
             conn, addr = s.accept()
@@ -19,7 +19,7 @@ def start_server():
                 data = conn.recv(4096).decode('utf-8', errors='ignore')
                 if data:
                     current_time = time.time()
-                    time_stamp = datetime.now().strftime('%H:%M:%S')
+                    time_stamp = datetime.now().strftime('%H:%M:%S %d-%m-%Y')
                     
                     # Проверяем разницу во времени
                     interval = current_time - last_received_time
