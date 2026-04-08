@@ -6,8 +6,6 @@
 #include <errno.h>
 #include <netdb.h>            // struct addrinfo
 #include <arpa/inet.h>
-#include "esp_mac.h"
-#include "esp_wifi.h"
 #include "driver/temperature_sensor.h"
 #include "driver/gpio.h"
 
@@ -19,30 +17,55 @@
 #include "oneshot_read_adc_main.c"
 #include "spi.h"
 #include "ota.h"
+#include "sensor.h"
 
-uint8_t gl_temperature[2];
 
 
 /*ADC Light sensor Task*/
 #define ADC_PERIOD 10			//Период измерения
-#define TRANSMIT_PERIOD 1000*5	//Период передачи показаний
+#define TRANSMIT_PERIOD 1000*1	//Период передачи показаний
 float gl_luminosity;
+float gl_temp;
+float gl_chip_temp;
+uint8_t gl_temperature[2];
+
+float get_kty81_210_temp(int in_volt)
+{
+    const float VCC = 3.3;
+    const float R_PULLUP = 2000.0;
+    
+    // 1. Находим текущее сопротивление датчика
+    //float voltage = (adc_raw * VCC) / 4080.0;
+    float voltage = (float)in_volt/1000;
+    // Схема: VCC -> R_PULLUP -> [ADC] -> KTY -> GND
+    float r_kty = (voltage * R_PULLUP) / (VCC - voltage);
+
+    // 2. Линейная аппроксимация (R = m*T + c)
+    // По даташиту: 25°C = 2000 Ом, 100°C = 3392 Ом.
+    // Наклон (m) ≈ 18.56 Ом/°C
+    //float temp = (r_kty - R_PULLUP) / 18.56 + 25.0;
+    float temp = R_PULLUP * voltage/(VCC*18.56 - voltage*18.56) - 1536/18.56;
+    return temp;
+}
 
 void sensorsTask(void *pvParameters)
 {
+//	sensors_init();
 	config_MCP9800(); // Датчик температуры
 	
 	// CHip temperature sensor init
 	temperature_sensor_handle_t temp_handle = NULL;
-	temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 50);
+	temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(0, 50);
 	ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_handle));
 
 	// Аналоговые датчики
 	adc_config();
 	// Переменная для хранения предыдущего значения
-	static int filtered_value;
-	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value); //Начальное значение 
-	const int coeff = 16; // Коэффициент фильтрации
+	static int filtered_value1;
+	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value1); //Начальное значение 
+	static int filtered_value2;
+	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value2); //Начальное значение 
+	const int coeff = 64; // Коэффициент фильтрации
 	int count=0;
     while (1) {
         if (do_calibration1_chan0) {
@@ -52,39 +75,46 @@ void sensorsTask(void *pvParameters)
 			adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &raw_value);
 
 			// Применяем фильтр: y = (y * (k-1) + x) / k 
-			filtered_value = (filtered_value * (coeff - 1) + raw_value) / coeff;
+			filtered_value1 = (filtered_value1 * (coeff - 1) + raw_value) / coeff;
 
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value, &voltage));
+            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value1, &voltage));
 
-			gl_luminosity = pow(10,((float)voltage-255.0)/380); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
-        //ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &adc_raw[0][1]));
-        //ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, adc_raw[0][1]);
-        //if (do_calibration1_chan1) {
-        //    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan1_handle, adc_raw[0][1], &voltage[0][1]));
-        //    ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage[0][1]);
-        //}
+			gl_luminosity = pow(10,((float)voltage-253.0)/390); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+        if (do_calibration1_chan1) {
+			int raw_value;
+			int voltage;
+			adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &raw_value);
+			filtered_value2 = (filtered_value2 * (coeff - 1) + raw_value) / coeff;
+            adc_cali_raw_to_voltage(adc1_cali_chan1_handle, filtered_value2, &voltage);
+			gl_temp = get_kty81_210_temp(voltage);
+			//ESP_LOGI("ADC", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, filtered_value2);
+            //ESP_LOGI("ADC", "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage);
+        }
 			
 			// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
 			if (count == TRANSMIT_PERIOD/ADC_PERIOD){
 				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-				char payload[40];
-				snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				//char payload[40];
+				//snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
+				sensor_data_t val = temperature_calc(gl_temperature);
+				sensor_set_value(0, VAL_TYPE_FLOAT, "t", "MCP9800", val);
+				//esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
 				// Enable temperature sensor
 				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
 				// Get converted sensor data
-				float tsens_out;
-				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &tsens_out));
+				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &val.f));
+				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "ESP32C3_temp", val);
 				// Disable the temperature sensor if it is not needed and save the power
 				ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
 
-				snprintf(payload, sizeof(payload), "Chip_Temp:%.2f", tsens_out);
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
-			
-				snprintf(payload, sizeof(payload), "Lumin:%.2f", gl_luminosity);
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				val.f = gl_temp;
+				sensor_set_value(2, VAL_TYPE_FLOAT, "t", "KTY81_210", val);
+				val.f = gl_luminosity;
+				sensor_set_value(3, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
 				count=0;
+
+				send_sensors_values();
 			}
 			count++;
         }
@@ -96,37 +126,6 @@ void sensorsTask(void *pvParameters)
 
 static const char *TCP_TAG = "TCP_IP";
 
-void create_data(char *data)
-{
-// Device MAC getting
-	uint8_t mac[6];
-	esp_base_mac_addr_get(mac);
-// Add sensors MAC, NAME info
-	sprintf(data,"#"MACSTR, MAC2STR(mac));
-	sprintf(data+strlen(data),"#AirClean"); // The NAME field
-	sprintf(data+strlen(data),"\n");
-// Add BSSID and RSSI information
-	wifi_ap_record_t ap_info;
-	esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
-	if (res == ESP_OK) {
-		ESP_LOGI(TCP_TAG, "RSSI: %d dBm", ap_info.rssi);
-	} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
-		ESP_LOGE(TCP_TAG, "Ошибка: Устройство не подключено к AP\n");
-	} else {
-		ESP_LOGE(TCP_TAG, "Ошибка получения данных: %d\n", res);
-	}
-	sprintf(data+strlen(data),"#AP:"MACSTR"#%d", MAC2STR(ap_info.bssid),ap_info.rssi);
-	sprintf(data+strlen(data),"\n");
-//Add temperature sensor info
-	sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
-	sprintf(data+strlen(data),"\n");
-//Add temperature sensor info
-	sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
-	sprintf(data+strlen(data),"\n");
-// End of package
-	sprintf(data+strlen(data),"##");
-}
-
 void after_success()
 {
 //	gpio_set_level(BLINK_GPIO, 0); // LED is on
@@ -136,10 +135,9 @@ void after_failure()
 //	gpio_set_level(BLINK_GPIO, 1); // LED is off
 }
 
-//#define HOST_IP_ADDR	"fd01::568d:5aff:fed3:c363"
-#define HOST_IP_ADDR "192.168.1.75"						// Debug IP-address
+#define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105"						// Debug IP-address
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 1000*60 // Perod between sends
+#define TIME_PERIOD 1000*60*5+1 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
@@ -151,26 +149,36 @@ void tcp_clientTask(void *pvParameters)
 	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
 
     char rx_buffer[128];
-    char host_ip[] = HOST_IP_ADDR; //gl_narodmon_addr;
+   // char host_ip[] = HOST_IP_ADDR; //gl_narodmon_addr;
     int addr_family = 0;
     int ip_protocol = 0;
 
-// String for sending to server
 	int sock=-1;
     while (1) {
 		time_t now;
 		time(&now);
 		printf("Time NOW: %d\n", (int)now);
 		printf("Time of last send: %d\n", (int)gl_last_send_time);
-		if (now-gl_last_send_time < TIME_PERIOD/1000) {
-			printf("Time to wait : %d second\n", (int)(TIME_PERIOD-1000*(now-gl_last_send_time))/1000);
-			vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
+		if (now-gl_last_send_time<0) //Последняя передача в будущем
+			vTaskDelay(TIME_PERIOD);
+		else if (now-gl_last_send_time < TIME_PERIOD/1000) {
+			int time_to_wait = (TIME_PERIOD-1000*(now-gl_last_send_time)); // ms
+			printf("Time to wait : %d second\n", time_to_wait/1000);
+			if (time_to_wait>0)
+				vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
 		}
 		do { 
 			do_ping_cmd(HOST_IP_ADDR);
 #define PING_PERIOD 1000*2
 			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
 		} while(!gl_ping); //Ждём пинга от сервера
+
+		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
+		if (hp == NULL) {
+			ESP_LOGE(TCP_TAG, "DNS lookup failed");
+			continue;
+		}
+		char *host_ip = inet_ntoa(*(struct in_addr *)hp->h_addr_list[0]);
 
         struct sockaddr_in dest_addr;
         inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
@@ -179,6 +187,8 @@ void tcp_clientTask(void *pvParameters)
         addr_family = AF_INET;
         ip_protocol = IPPROTO_IP;
 
+					time(&gl_last_send_time);  //Set last send to server time
+					save_last_send_time(gl_last_send_time); // Write last send time to flash
         if (sock != -1) {
             ESP_LOGE(TCP_TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
@@ -202,6 +212,7 @@ void tcp_clientTask(void *pvParameters)
 
 		char  data[4096];
 		create_data(data);
+		printf(data);
 		ESP_LOGI(TCP_TAG, "Data length = %d\n",strlen(data));
 
 	// Send to server
@@ -212,9 +223,11 @@ void tcp_clientTask(void *pvParameters)
 				continue;
             }
 
-// Recieve part for server ansvers
-#define TIMEOUT 1000*1
-			vTaskDelay(pdMS_TO_TICKS(TIMEOUT)); // Timeout for server reply
+			struct timeval tv;
+			tv.tv_sec = 10; // 5 секунд ждать ответа
+			tv.tv_usec = 0;
+			setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
             int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
             // Error occurred during receiving
             if (len < 0) {
@@ -228,26 +241,21 @@ void tcp_clientTask(void *pvParameters)
                 //ESP_LOGI(TCP_TAG, "Received %d bytes from %s:", len, host_ip);
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
 				if (strcmp(rx_buffer,"OK")) 
-					while(1){
-						void after_failure();
-						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
-						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
-					}
+					after_failure();
+//					while(1){
+//						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
+//						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
+//					}
 				else{
-					time(&gl_last_send_time);  //Set last send to server time
-					save_last_send_time(gl_last_send_time); // Write last send time to flash
 					after_success();
 				}
 				
             }
-			//printf("----------------------------------------------------------------------\n");
 			ESP_LOGI(TCP_TAG, "----------");
-
-			//vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD));
     }
 }
 
-#define TIME_TO_TIME 1000*60 //3600
+#define TIME_TO_TIME 1000*60*10 //3600
 void timeTask(void *pvParameters)
 {
 	bool tcp_notify_given=false; //Эта переменная нужна, чтобы задача не надоедала уведомлениями

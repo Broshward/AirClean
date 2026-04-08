@@ -11,7 +11,7 @@ def start_server():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('0.0.0.0', 8283))
         s.listen(1)
-        print(f"[{datetime.now().strftime('%H:%M:%S %d-%m-%Y')}] Сервер запущен. Ожидание интервала > 60 сек.")
+        print(f"[{datetime.now().strftime('%H:%M:%S %d-%m-%Y')}] Сервер запущен. Ожидание интервала > 5 min.")
 
         while True:
             conn, addr = s.accept()
@@ -24,7 +24,7 @@ def start_server():
                     # Проверяем разницу во времени
                     interval = current_time - last_received_time
                     
-                    if last_received_time != 0 and interval < 60:
+                    if last_received_time != 0 and interval < 60*5:
                         # Если прошло меньше 60 секунд
                         error_msg = f"INTERVAL {int(interval)}s < 1m"
                         print(f"[{time_stamp}] Ошибка от {addr}: {error_msg}\n")
@@ -33,7 +33,7 @@ def start_server():
                     else:
                         # Если всё в порядке
                         print(f"[{time_stamp}] Принято от {addr}:\n{data.strip()}")
-                        conn.sendall(b"OK")
+#                        conn.sendall(b"OK")
                         last_received_time = current_time
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@
 #include "oneshot_read_adc_main.h"
 const static char *ADC_TAG = "ADC";
 
+bool do_calibration1_chan0;
+bool do_calibration1_chan1;
 /*---------------------------------------------------------------
         ADC General Macros
 ---------------------------------------------------------------*/
@@ -24,13 +26,13 @@ void adc_config(void)
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, EXAMPLE_ADC1_CHAN0, &config));
-    //ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, EXAMPLE_ADC1_CHAN1, &config));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, EXAMPLE_ADC1_CHAN1, &config));
 
     //-------------ADC1 Calibration Init---------------//
     adc1_cali_chan0_handle = NULL;
     adc1_cali_chan1_handle = NULL;
     do_calibration1_chan0 = example_adc_calibration_init(ADC_UNIT_1, EXAMPLE_ADC1_CHAN0, EXAMPLE_ADC_ATTEN, &adc1_cali_chan0_handle);
-    //bool do_calibration1_chan1 = example_adc_calibration_init(ADC_UNIT_1, EXAMPLE_ADC1_CHAN1, EXAMPLE_ADC_ATTEN, &adc1_cali_chan1_handle);
+    do_calibration1_chan1 = example_adc_calibration_init(ADC_UNIT_1, EXAMPLE_ADC1_CHAN1, EXAMPLE_ADC_ATTEN, &adc1_cali_chan1_handle);
 
 }
 

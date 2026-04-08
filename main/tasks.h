@@ -9,3 +9,8 @@ void spi_test(void *pvParameters);
 
 #include "freertos/FreeRTOS.h"
 extern TaskHandle_t tcptask;
+
+extern float gl_luminosity;
+extern float gl_temp;
+extern float gl_chip_temp;
+extern uint8_t gl_temperature[2];

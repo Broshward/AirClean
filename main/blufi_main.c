@@ -1,17 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2021-2024 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-
-
-/****************************************************************************
-* This is a demo for bluetooth config wifi connection to ap. You can config ESP32 to connect a softap
-* or config ESP32 as a softap to be connected by other device. APP can be downloaded from github
-* android source code: https://github.com/EspressifApp/EspBlufi
-* iOS source code: https://github.com/EspressifApp/EspBlufiForiOS
-****************************************************************************/
-
 #include "tasks.h"
 #include "times.h"
 #include "ota.h"
@@ -36,6 +22,7 @@
 
 #include "esp_blufi_api.h"
 #include "blufi.h"
+#include "sensor.h"
 
 #include "esp_blufi.h"
 #include "lwip/ip_addr.h"
@@ -615,6 +602,10 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		}
 	    if (strcmp(cmd, "GET_SYNC_TIME") == 0) {
 			send_last_sync_sntp();
+		}
+
+	    if (strcmp(cmd, "GET_SENSORS") == 0) {
+			send_sensors();
 		}
 
 		if (strncmp(cmd, "SET_TZ:", 7) == 0) {

@@ -73,16 +73,9 @@ void i2c_init()
 }
 
 #define CONFIG_REGISTER_VALUE		(0b11<<5)
-#define TEMPERATURE_RESOLUTION		0.0625 
 void config_MCP9800()
 {
 	//Write configuration
     i2c_register_write_byte(MCP9800_handle, MCP9800_CONFIG_REG, CONFIG_REGISTER_VALUE); //12-bit resolution
-}
-
-float temperature_calc(uint8_t *data)
-{
-	float temp = ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
-	return temp;
 }
 

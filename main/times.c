@@ -79,6 +79,15 @@ void send_last_sync_sntp()
 static uint8_t bcd2dec(uint8_t val) { return ((val >> 4) * 10) + (val & 0x0f); }
 static uint8_t dec2bcd(uint8_t val) { return ((val / 10) << 4) | (val % 10); }
 
+// Функция нужна для DS1307
+void rtc_init_DS1307()
+{
+	uint8_t data;
+	i2c_register_read(RTC_handle, 0, &data, 1);
+	i2c_register_write_byte(RTC_handle, 0, data&0x7f);
+	//i2c_register_write_byte(RTC_handle, 0, data);
+}
+
 // Чтение времени из RTC и установка в систему
 void rtc_to_system_time() 
 {
@@ -98,7 +107,7 @@ void rtc_to_system_time()
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL);
     ESP_LOGI("RTC", "Время установлено из MCP79410");
-	//printf("TIME:%d\n",(int)t);
+	//printf("SEC=%x\n",data[0]);
 }
 
 // Запись системного (NTP) времени в RTC

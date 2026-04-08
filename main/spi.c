@@ -54,6 +54,7 @@ static void wait_for_eeprom_ready() {
 
 uint8_t eeprom_read_byte(uint16_t address) 
 {
+    wait_for_eeprom_ready();
     uint8_t data = 0;
     // Подготавливаем команду и адрес
     // P25C256 ждет: [Команда 0x03] [MSB Адреса] [LSB Адреса]
@@ -199,6 +200,6 @@ void eeprom_erase_range(uint16_t start_addr, uint16_t length)
         remaining -= chunk;
     }
     
-    wait_for_eeprom_ready(); // Ждем финализации последней записи
+//    wait_for_eeprom_ready(); // Ждем финализации последней записи 
     ESP_LOGI("EEPROM", "Стирание завершено.");
 }
