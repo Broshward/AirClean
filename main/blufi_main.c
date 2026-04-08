@@ -84,6 +84,8 @@ TaskHandle_t tcptask;
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
 
+bool is_ble_ready = false;
+
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
     nvs_handle_t my_handle;
@@ -375,7 +377,10 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         ble_is_connected = true;
         esp_blufi_adv_stop();
         blufi_security_init();
-		//-----------------
+		// Disable transmit sensors and time flag
+		is_ble_ready = false;
+		vTaskDelay(pdMS_TO_TICKS(2000)); // Если это отдельный Task, то можно.
+		is_ble_ready = true;
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         BLUFI_INFO("BLUFI ble disconnect\n");

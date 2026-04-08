@@ -31,3 +31,4 @@ void sensor_set_value(int id, value_type_t v_type, const char* name, const char*
 sensor_data_t temperature_calc(uint8_t *data);
 void send_sensors_values(void);
 
+extern bool is_ble_ready;

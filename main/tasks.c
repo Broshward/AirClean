@@ -92,7 +92,7 @@ void sensorsTask(void *pvParameters)
         }
 			
 			// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
-			if (count == TRANSMIT_PERIOD/ADC_PERIOD){
+			if (count >= TRANSMIT_PERIOD/ADC_PERIOD){
 				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
 				//char payload[40];
 				//snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
@@ -255,15 +255,20 @@ void tcp_clientTask(void *pvParameters)
     }
 }
 
-#define TIME_TO_TIME 1000*60*10 //3600
+#define TIME_SYNC_FROM_RTC 1000*60*10 //10 minutes
+#define TIME_SEND_TO_APP 1000*1 // 1 second
 void timeTask(void *pvParameters)
 {
 	bool tcp_notify_given=false; //Эта переменная нужна, чтобы задача не надоедала уведомлениями
+	int count=0;
 	while(1){
-		rtc_to_system_time(); // Синхронизируем с внутренними часами каждые TIME_TO_TIME
+		if (count >= TIME_SYNC_FROM_RTC/TIME_SEND_TO_APP){
+			rtc_to_system_time(); // Синхронизируем с внутренними часами 
+			count=0;
+		}
 		time_t now;
 		time(&now);
-		printf("Time = %u (0x%X)\n", (unsigned )now, (unsigned)now);
+		//printf("Time = %u (0x%X)\n", (unsigned )now, (unsigned)now);
 
 		char payload[35];
 		char timestr[20];
@@ -289,7 +294,8 @@ void timeTask(void *pvParameters)
 			ESP_LOGI("Time", "Resync time");
 			resync_time();
 		}
-		vTaskDelay(pdMS_TO_TICKS(TIME_TO_TIME));
+		vTaskDelay(pdMS_TO_TICKS(TIME_SEND_TO_APP));
+		count++;
 	}
 }
 

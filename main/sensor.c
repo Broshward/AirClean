@@ -51,8 +51,9 @@ void sensor_set_value(int id, value_type_t v_type, const char* name, const char*
 
 #define MAX_BLUFI_PACKET 128 // Оптимальный размер для стабильной передачи
 
-void send_sensors_values(void) {
-    if (sensor_count == 0) return;
+void send_sensors_values(void) 
+{
+    if (!is_ble_ready || sensor_count == 0) return;
 
     char buf[MAX_BLUFI_PACKET];
     char temp[32]; // Временный буфер для одной записи (ID:VAL;)
