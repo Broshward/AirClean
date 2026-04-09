@@ -43,8 +43,8 @@ float get_kty81_210_temp(int in_volt)
     // 2. Линейная аппроксимация (R = m*T + c)
     // По даташиту: 25°C = 2000 Ом, 100°C = 3392 Ом.
     // Наклон (m) ≈ 18.56 Ом/°C
-    //float temp = (r_kty - R_PULLUP) / 18.56 + 25.0;
-    float temp = R_PULLUP * voltage/(VCC*18.56 - voltage*18.56) - 1536/18.56;
+    float temp = (r_kty - R_PULLUP) / 18.56 + 25.0;
+    //float temp = R_PULLUP * voltage/(VCC*18.56 - voltage*18.56) - 1536/18.56;
     return temp;
 }
 
@@ -96,7 +96,8 @@ void sensorsTask(void *pvParameters)
 				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
 				//char payload[40];
 				//snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
-				sensor_data_t val = temperature_calc(gl_temperature);
+				sensor_data_t val;
+				val.f = temperature_calc(gl_temperature);
 				sensor_set_value(0, VAL_TYPE_FLOAT, "t", "MCP9800", val);
 				//esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
@@ -104,12 +105,12 @@ void sensorsTask(void *pvParameters)
 				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
 				// Get converted sensor data
 				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &val.f));
-				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "ESP32C3_temp", val);
+				sensor_set_value(1, VAL_TYPE_FLOAT, "sw", "ESP32C3_temp", val);
 				// Disable the temperature sensor if it is not needed and save the power
 				ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
 
 				val.f = gl_temp;
-				sensor_set_value(2, VAL_TYPE_FLOAT, "t", "KTY81_210", val);
+				sensor_set_value(2, VAL_TYPE_FLOAT, "h", "KTY81_210", val);
 				val.f = gl_luminosity;
 				sensor_set_value(3, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
 				count=0;
@@ -167,11 +168,11 @@ void tcp_clientTask(void *pvParameters)
 			if (time_to_wait>0)
 				vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
 		}
-		do { 
-			do_ping_cmd(HOST_IP_ADDR);
-#define PING_PERIOD 1000*2
-			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
-		} while(!gl_ping); //Ждём пинга от сервера
+//		do { 
+//			do_ping_cmd(HOST_IP_ADDR);
+//#define PING_PERIOD 1000*2
+//			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
+//		} while(!gl_ping); //Ждём пинга от сервера
 
 		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
 		if (hp == NULL) {
@@ -260,7 +261,7 @@ void tcp_clientTask(void *pvParameters)
 void timeTask(void *pvParameters)
 {
 	bool tcp_notify_given=false; //Эта переменная нужна, чтобы задача не надоедала уведомлениями
-	int count=0;
+	int count=TIME_SYNC_FROM_RTC/TIME_SEND_TO_APP;
 	while(1){
 		if (count >= TIME_SYNC_FROM_RTC/TIME_SEND_TO_APP){
 			rtc_to_system_time(); // Синхронизируем с внутренними часами 
@@ -269,28 +270,32 @@ void timeTask(void *pvParameters)
 		time_t now;
 		time(&now);
 		//printf("Time = %u (0x%X)\n", (unsigned )now, (unsigned)now);
-
+		
 		char payload[35];
 		char timestr[20];
 		struct tm timeinfo;
 		localtime_r(&now, &timeinfo);
-		//Time
-		strftime(timestr, sizeof(timestr), "%H_%M_%S", &timeinfo);
-		snprintf(payload, sizeof(payload), "Time:%s", timestr);
-		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
-		//Date
-		strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
-		snprintf(payload, sizeof(payload), "Date:%s", timestr);
-		esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 		if (timeinfo.tm_year > 2025-1900) {
 			if (tcp_notify_given==false){
 				xTaskNotifyGive(tcptask);
 				tcp_notify_given=true;
 			}
+			if (is_ble_ready){
+				//Time
+				strftime(timestr, sizeof(timestr), "%H:%M:%S", &timeinfo);
+				snprintf(payload, sizeof(payload), "Time:%s", timestr);
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				//Date
+				strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
+				snprintf(payload, sizeof(payload), "Date:%s", timestr);
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			}
 		}
 		else {
-			snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
-			esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			if (is_ble_ready){
+				snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
+				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+			}
 			ESP_LOGI("Time", "Resync time");
 			resync_time();
 		}

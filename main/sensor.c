@@ -125,7 +125,7 @@ void create_data(char *data)
 	sprintf(data+strlen(data),"#AP:"MACSTR"#%d\n", MAC2STR(ap_info.bssid),ap_info.rssi);
 
 //Add temperature sensor info
-	sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature).f);
+	sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
 	sprintf(data+strlen(data),"\n");
 //Add temperature sensor info
 	sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
@@ -135,10 +135,8 @@ void create_data(char *data)
 }
 
 #define TEMPERATURE_RESOLUTION		0.0625 
-sensor_data_t temperature_calc(uint8_t *data)
+float temperature_calc(uint8_t *data)
 {
-	sensor_data_t temp;
-	temp.f = ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
-	return temp;
+	return ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
 }
 

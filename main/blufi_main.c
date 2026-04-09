@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/timers.h"
 #include "esp_system.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
@@ -85,6 +86,13 @@ TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
 
 bool is_ble_ready = false;
+TimerHandle_t ble_stable_timer;
+
+// Функция, которая вызовется, когда таймер "пропищит"
+void vBleStableTimerCallback(TimerHandle_t xTimer) {
+    is_ble_ready = true;
+    ESP_LOGI("SENSOR", "BLE is now stable and ready for data");
+}
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
@@ -379,14 +387,20 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         blufi_security_init();
 		// Disable transmit sensors and time flag
 		is_ble_ready = false;
-		vTaskDelay(pdMS_TO_TICKS(2000)); // Если это отдельный Task, то можно.
-		is_ble_ready = true;
+		vTaskDelay(pdMS_TO_TICKS(3000)); // Если это отдельный Task, то можно.
+		if (ble_stable_timer) {
+			xTimerStart(ble_stable_timer, 0); // Запускаем таймер без блокировки
+		}
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         BLUFI_INFO("BLUFI ble disconnect\n");
         ble_is_connected = false;
         blufi_security_deinit();
         esp_blufi_adv_start();
+		is_ble_ready = false;
+		if (ble_stable_timer) {
+			xTimerStop(ble_stable_timer, 0);
+		}	
         break;
     case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
         BLUFI_INFO("BLUFI Set WIFI opmode %d\n", param->wifi_mode.op_mode);
@@ -700,6 +714,12 @@ void app_main(void)
     }
 
     BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
+	
+    ble_stable_timer = xTimerCreate("BleStableTimer",	// is_ble_ready timer 
+                                    pdMS_TO_TICKS(2000), // Задержка 3 сек
+                                    pdFALSE,             // Однократный (не авто-рестарт)
+                                    (void *)0, 
+                                    vBleStableTimerCallback);	
 
 	// i2c init
     i2c_init();
