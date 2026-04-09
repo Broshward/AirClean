@@ -98,21 +98,21 @@ void sensorsTask(void *pvParameters)
 				//snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
 				sensor_data_t val;
 				val.f = temperature_calc(gl_temperature);
-				sensor_set_value(0, VAL_TYPE_FLOAT, "t", "MCP9800", val);
+				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "MCP9800", val);
 				//esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
 			
 				// Enable temperature sensor
 				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
 				// Get converted sensor data
 				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &val.f));
-				sensor_set_value(1, VAL_TYPE_FLOAT, "sw", "ESP32C3_temp", val);
+				sensor_set_value(2, VAL_TYPE_FLOAT, "t", "ESP32C3_temp", val);
 				// Disable the temperature sensor if it is not needed and save the power
 				ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
 
 				val.f = gl_temp;
-				sensor_set_value(2, VAL_TYPE_FLOAT, "h", "KTY81_210", val);
+				sensor_set_value(3, VAL_TYPE_FLOAT, "t", "KTY81_210", val);
 				val.f = gl_luminosity;
-				sensor_set_value(3, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
+				sensor_set_value(4, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
 				count=0;
 
 				send_sensors_values();
@@ -188,7 +188,7 @@ void tcp_clientTask(void *pvParameters)
         addr_family = AF_INET;
         ip_protocol = IPPROTO_IP;
 
-					time(&gl_last_send_time);  //Set last send to server time
+					time(&gl_last_send_time);  //Set last attempt send to server time
 					save_last_send_time(gl_last_send_time); // Write last send time to flash
         if (sock != -1) {
             ESP_LOGE(TCP_TAG, "Shutting down socket and restarting...");
@@ -211,8 +211,8 @@ void tcp_clientTask(void *pvParameters)
         }
         ESP_LOGI(TCP_TAG, "Successfully connected");
 
-		char  data[4096];
-		create_data(data);
+		char  data[4096]; //Max length tcp buffer of narodmon server
+		get_narodmon_string(data, sizeof(data)); 
 		printf(data);
 		ESP_LOGI(TCP_TAG, "Data length = %d\n",strlen(data));
 

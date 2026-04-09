@@ -97,41 +97,57 @@ void send_sensors()
 	temp_pce[0]='\0';
 
     for (int i = 0; i < sensor_count; i++) {
-		sprintf(temp_pce, "%d:%d:%s:%s;", i, all_sensors[i].val_type,all_sensors[i].type_name,all_sensors[i].label);
+		sprintf(temp_pce, "%d:%d:%s:%s;", all_sensors[i].id, all_sensors[i].val_type,all_sensors[i].type_name,all_sensors[i].label);
 		strcat(out_buffer,temp_pce);
 	}
 	esp_blufi_send_custom_data((uint8_t *)out_buffer, strlen(out_buffer));
 }
 
-void create_data(char *data)
+void get_narodmon_string(char *data, size_t max_len) 
 {
-// Device MAC getting
-	uint8_t mac[6];
-	esp_base_mac_addr_get(mac);
-// Add sensors MAC, NAME info
-	sprintf(data,"#"MACSTR, MAC2STR(mac));
-	sprintf(data+strlen(data),"#AirClean"); // The NAME field
-	sprintf(data+strlen(data),"\n");
-// Add BSSID and RSSI information
-	wifi_ap_record_t ap_info;
-	esp_err_t res = esp_wifi_sta_get_ap_info(&ap_info);
-	if (res == ESP_OK) {
-		ESP_LOGI(SENSOR_TAG, "RSSI: %d dBm", ap_info.rssi);
-	} else if (res == ESP_ERR_WIFI_NOT_CONNECT) {
-		ESP_LOGE(SENSOR_TAG, "Ошибка: Устройство не подключено к AP\n");
-	} else {
-		ESP_LOGE(SENSOR_TAG, "Ошибка получения данных: %d\n", res);
-	}
-	sprintf(data+strlen(data),"#AP:"MACSTR"#%d\n", MAC2STR(ap_info.bssid),ap_info.rssi);
+    uint8_t mac[6];
+    esp_base_mac_addr_get(mac); 
+	//esp_read_mac(mac, ESP_MAC_BT); // Явно просим адрес блютуза	
 
-//Add temperature sensor info
-	sprintf(data+strlen(data),"#T1#%.2f#MCP9800", temperature_calc(gl_temperature));
-	sprintf(data+strlen(data),"\n");
-//Add temperature sensor info
-	sprintf(data+strlen(data),"#L1#%.2f#APDS-9007", gl_luminosity);
-	sprintf(data+strlen(data),"\n");
-// End of package
-	sprintf(data+strlen(data),"##");
+    // 1. Заголовок: ID устройства (MAC) и имя
+    snprintf(data, max_len, "#" MACSTR "#AirClean\n", MAC2STR(mac));
+
+    // 2. Служебная информация: BSSID, RSSI
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+	    snprintf(data + strlen(data), max_len - strlen(data), 
+             "#AP:" MACSTR "#%d\n", MAC2STR(ap_info.bssid), ap_info.rssi);
+    }
+
+    // 3. Динамический опрос всех датчиков из нашего массива
+    for (int i = 0; i < sensor_count; i++) {
+        char sensor_line[64];
+        
+        // Формируем уникальный ключ датчика (например, T1, T2 или по его ID)
+        // Народмон любит короткие ключи, поэтому используем type_name + ID
+        if (all_sensors[i].val_type == VAL_TYPE_FLOAT) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%.2f#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.f, all_sensors[i].label);
+        } 
+        else if (all_sensors[i].val_type == VAL_TYPE_BOOL) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.b ? 1 : 0, all_sensors[i].label);
+        }
+        else if (all_sensors[i].val_type == VAL_TYPE_INT) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.i, all_sensors[i].label);
+        }
+        // Добавляем строку в общий буфер, если есть место
+        if (strlen(data) + strlen(sensor_line) < max_len - 3) {
+            strcat(data, sensor_line);
+        }
+    }
+
+    // 4. Финальная точка пакета
+    strcat(data, "##");
 }
 
 #define TEMPERATURE_RESOLUTION		0.0625 

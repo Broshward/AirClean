@@ -28,5 +28,6 @@ void create_data(char *data);
 void sensor_set_value(int id, value_type_t v_type, const char* name, const char* label, sensor_data_t new_val);
 float temperature_calc(uint8_t *data);
 void send_sensors_values(void);
+void get_narodmon_string(char *data, size_t max_len);
 
 extern bool is_ble_ready;
