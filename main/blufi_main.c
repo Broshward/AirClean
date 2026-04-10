@@ -197,7 +197,7 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
 	             IP2STR(&event->ip_info.netmask),
 	             IP2STR(&event->ip_info.gw));
 	
-	    esp_blufi_send_custom_data((uint8_t *)net_info, strlen(net_info));
+	    queue_blufi_data((uint8_t *)net_info, strlen(net_info));
 
         esp_blufi_extra_info_t info;
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
@@ -387,7 +387,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         blufi_security_init();
 		// Disable transmit sensors and time flag
 		is_ble_ready = false;
-		vTaskDelay(pdMS_TO_TICKS(3000)); // Если это отдельный Task, то можно.
 		if (ble_stable_timer) {
 			xTimerStart(ble_stable_timer, 0); // Запускаем таймер без блокировки
 		}
@@ -398,9 +397,9 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         blufi_security_deinit();
         esp_blufi_adv_start();
 		is_ble_ready = false;
-		if (ble_stable_timer) {
-			xTimerStop(ble_stable_timer, 0);
-		}	
+		//if (ble_stable_timer) {
+		//	xTimerStop(ble_stable_timer, 0);
+		//}	
         break;
     case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
         BLUFI_INFO("BLUFI Set WIFI opmode %d\n", param->wifi_mode.op_mode);
@@ -570,7 +569,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 						 IP2STR(&ip_info.gw),
 						 is_static_mode);
 				
-				esp_blufi_send_custom_data((uint8_t *)response, strlen(response));
+				queue_blufi_data((uint8_t *)response, strlen(response));
 			}
 		}
 		if (strncmp(cmd, "SET_STATIC:", 11) == 0) {
@@ -598,7 +597,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 				// Отправим подтверждение обратно в приложение
 	            char resp[100];
 				snprintf(resp, sizeof(resp), "CONFIRM_STATIC:%s", ip_str);
-				esp_blufi_send_custom_data((uint8_t *)resp, strlen(resp));
+				queue_blufi_data((uint8_t *)resp, strlen(resp));
 
 				// Запись новых значений во флэш
 				save_static_ip_to_nvs(ip_str, mask_str, gw_str);
@@ -738,5 +737,6 @@ void app_main(void)
 
 	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for times 
 	xTaskCreate( spi_test, "SPI test", 10000, NULL, 1, NULL); //Task for test SPI
+	xTaskCreate( blufi_sender_task, "Custom Data sender", 4096, NULL, 1, NULL); //Task for test SPI
 
 }

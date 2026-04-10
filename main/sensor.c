@@ -73,7 +73,7 @@ void send_sensors_values(void)
         // ПРОВЕРКА: Поместится ли temp в текущий buf?
         if (strlen(buf) + strlen(temp) >= MAX_BLUFI_PACKET - 1) {
             // Если не влезает — отправляем то, что уже накопили
-            esp_blufi_send_custom_data((uint8_t*)buf, strlen(buf));
+            queue_blufi_data((uint8_t*)buf, strlen(buf));
             
             // Начинаем новый пакет с тем же префиксом
             snprintf(buf, sizeof(buf), "Values:");
@@ -84,7 +84,7 @@ void send_sensors_values(void)
 
     // Отправляем остаток (последний пакет)
     if (strlen(buf) > 7) { // 7 — это длина "Values|"
-        esp_blufi_send_custom_data((uint8_t*)buf, strlen(buf));
+        queue_blufi_data((uint8_t*)buf, strlen(buf));
     }
 }
 
@@ -100,7 +100,7 @@ void send_sensors()
 		sprintf(temp_pce, "%d:%d:%s:%s;", all_sensors[i].id, all_sensors[i].val_type,all_sensors[i].type_name,all_sensors[i].label);
 		strcat(out_buffer,temp_pce);
 	}
-	esp_blufi_send_custom_data((uint8_t *)out_buffer, strlen(out_buffer));
+	queue_blufi_data((uint8_t *)out_buffer, strlen(out_buffer));
 }
 
 void get_narodmon_string(char *data, size_t max_len) 

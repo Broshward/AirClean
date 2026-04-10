@@ -29,6 +29,9 @@ float gl_temp;
 float gl_chip_temp;
 uint8_t gl_temperature[2];
 
+static QueueHandle_t blufi_tx_queue = NULL;
+
+
 float get_kty81_210_temp(int in_volt)
 {
     const float VCC = 3.3;
@@ -99,7 +102,7 @@ void sensorsTask(void *pvParameters)
 				sensor_data_t val;
 				val.f = temperature_calc(gl_temperature);
 				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "MCP9800", val);
-				//esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				//queue_blufi_data((uint8_t *)payload, strlen(payload));
 			
 				// Enable temperature sensor
 				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
@@ -115,7 +118,8 @@ void sensorsTask(void *pvParameters)
 				sensor_set_value(4, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
 				count=0;
 
-				send_sensors_values();
+				if (is_ble_ready)
+					send_sensors_values();
 			}
 			count++;
         }
@@ -284,17 +288,17 @@ void timeTask(void *pvParameters)
 				//Time
 				strftime(timestr, sizeof(timestr), "%H:%M:%S", &timeinfo);
 				snprintf(payload, sizeof(payload), "Time:%s", timestr);
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				queue_blufi_data((uint8_t *)payload, strlen(payload));
 				//Date
 				strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
 				snprintf(payload, sizeof(payload), "Date:%s", timestr);
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				queue_blufi_data((uint8_t *)payload, strlen(payload));
 			}
 		}
 		else {
 			if (is_ble_ready){
 				snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
-				esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+				queue_blufi_data((uint8_t *)payload, strlen(payload));
 			}
 			ESP_LOGI("Time", "Resync time");
 			resync_time();
@@ -306,12 +310,62 @@ void timeTask(void *pvParameters)
 
 void spi_test(void *pvParameters)
 {
-	init_spi_eeprom();
+	init_external_flash_spi();
 	int i=0;
-	//time_t now;
 	while(1){
-	//	rtc_to_system_time();
-		vTaskDelay(pdMS_TO_TICKS(10000));
+		read_flash_id();
+		vTaskDelay(pdMS_TO_TICKS(1000));
 		i+=4;
 	}
 }
+
+void blufi_sender_task(void *pvParameters) 
+{
+    blufi_msg_t msg;
+	blufi_tx_queue = xQueueCreate(10, sizeof(blufi_msg_t));
+    
+    while (1) {
+        // Ждем сообщение из очереди
+        if (xQueueReceive(blufi_tx_queue, &msg, portMAX_DELAY)) {
+            
+            // Пытаемся отправить данные
+            esp_err_t ret = esp_blufi_send_custom_data(msg.payload, msg.length);
+            
+            if (ret == ESP_OK) {
+                // Успешно отправлено
+                //ESP_LOGI("BLUFI_TX", "Sent %d bytes", msg.length);
+            } else {
+                // Если возникла ошибка или "wait to send", пробуем повторить ОДИН раз через паузу
+                ESP_LOGW("BLUFI_TX", "Send failed (0x%x), retrying...", ret);
+                vTaskDelay(pdMS_TO_TICKS(100)); 
+                esp_blufi_send_custom_data(msg.payload, msg.length);
+            }
+
+            // Обязательно освобождаем память, которую выделила задача-отправитель
+            free(msg.payload);
+        }
+    }
+}
+
+esp_err_t queue_blufi_data(uint8_t *data, size_t len) 
+{
+    if (blufi_tx_queue == NULL) return ESP_FAIL;
+
+    blufi_msg_t msg;
+    msg.length = len;
+    msg.payload = malloc(len); // Выделяем память под копию данных
+    
+    if (msg.payload == NULL) return ESP_ERR_NO_MEM;
+    
+    memcpy(msg.payload, data, len);
+
+    // Отправляем в очередь (не ждем долго, если очередь полна — значит данных слишком много)
+    if (xQueueSend(blufi_tx_queue, &msg, pdMS_TO_TICKS(50)) != pdPASS) {
+        free(msg.payload);
+        ESP_LOGE("BLUFI_TX", "Queue full, dropping packet!");
+        return ESP_FAIL;
+    }
+    
+    return ESP_OK;
+}
+

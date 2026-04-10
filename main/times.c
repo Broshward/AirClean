@@ -8,6 +8,7 @@
 #include "times.h"
 #include "blufi.h"
 #include "i2c.h"
+#include "tasks.h"
 
 time_t last_sync_sntp=0;
 
@@ -70,9 +71,9 @@ void send_last_sync_sntp()
 	strftime(time_str, sizeof(time_str), "%H_%M_%S %d-%m-%Y", &timeinfo);
 	char payload[35];
 	snprintf(payload, sizeof(payload), "Time_sync_sntp:%s", time_str);
-	esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+	queue_blufi_data((uint8_t *)payload, strlen(payload));
 	snprintf(payload, sizeof(payload), "TZ:%d", (int)load_tz_from_nvs());
-	esp_blufi_send_custom_data((uint8_t *)payload, strlen(payload));
+	queue_blufi_data((uint8_t *)payload, strlen(payload));
 }
 
 // Вспомогательные функции BCD
