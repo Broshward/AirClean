@@ -2,204 +2,112 @@
 #include "esp_log.h"
 #include <string.h>
 
+#define PIN_NUM_MISO 5
+#define PIN_NUM_MOSI 6
+#define PIN_NUM_CLK  7
+#define PIN_NUM_CS   10
 
-// This code for working with SPI-eeprom p25cXX series (p25c256)
-#define CMD_WREN  0x06  // Write Enable
-#define CMD_WRITE 0x02  // Page Program (Запись)
-#define CMD_READ  0x03  // Read Data (Чтение)
-#define CMD_RDSR  0x05  // Read Status Register (Проверка готовности)
+spi_device_handle_t flash_spi;
 
-
-spi_device_handle_t eeprom_handle;
-
-static void eeprom_write_enable()
-{
-    spi_transaction_t wren_t = {.length = 8, .tx_data = {CMD_WREN}, .flags = SPI_TRANS_USE_TXDATA};
-    spi_device_polling_transmit(eeprom_handle, &wren_t);
-}
-
-void init_spi_eeprom() 
+void init_external_flash_spi() 
 {
     spi_bus_config_t buscfg = {
-        .miso_io_num = 5,   // MISO
-        .mosi_io_num = 6,   // MOSI 
-        .sclk_io_num = 7,   // SCK
+        .miso_io_num = PIN_NUM_MISO,
+        .mosi_io_num = PIN_NUM_MOSI,
+        .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
+        .max_transfer_sz = 4096,
     };
-    
+
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz (для надежности на макетке)
+        .clock_speed_hz = 1000 * 10, // 10 MHz
         .mode = 0,                         // SPI mode 0
-        .spics_io_num = 10,                 // CS пин
+        .spics_io_num = PIN_NUM_CS,
         .queue_size = 7,
     };
 
-    spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    spi_bus_add_device(SPI2_HOST, &devcfg, &eeprom_handle);
+    // Инициализация шины SPI
+    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    ESP_ERROR_CHECK(ret);
+
+    // Добавление устройства (флешки) на шину
+    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &flash_spi);
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI("FLASH", "SPI initialized on GPIO 5,6,7,10");
 }
 
-static void wait_for_eeprom_ready() {
-    uint8_t status = 0;
-    do {
-        spi_transaction_t status_t = {
-            .length = 8 * 2,
-            .flags = SPI_TRANS_USE_RXDATA | SPI_TRANS_USE_TXDATA,
-            .tx_data = {CMD_RDSR, 0x00}
-        };
-        spi_device_polling_transmit(eeprom_handle, &status_t);
-        status = status_t.rx_data[1];
-    } while (status & 0x01); // Бит 0 — это busy флаг
-}
-
-uint8_t eeprom_read_byte(uint16_t address) 
+void read_flash_id() 
 {
-    wait_for_eeprom_ready();
-    uint8_t data = 0;
-    // Подготавливаем команду и адрес
-    // P25C256 ждет: [Команда 0x03] [MSB Адреса] [LSB Адреса]
-    uint8_t tx_buf[4] = {
-        CMD_READ, 
-        (uint8_t)(address >> 8), 
-        (uint8_t)(address & 0xFF),
-        0x00 // Байт-заполнитель, во время которого придет ответ
-    };
-    uint8_t rx_buf[4] = {0};
+    uint8_t tx_data[4] = {0x9F, 0x00, 0x00, 0x00}; // Команда + 3 пустых байта
+    uint8_t rx_data[4];
 
-    spi_transaction_t t = {
-        .length = 8 * 4,           // Всего 4 байта (3 передаем, 1 принимаем)
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf,
-    };
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 32;          // Всего 32 бита (8 команда + 24 ответ)
+    t.tx_buffer = tx_data;
+    t.rx_buffer = rx_data;
 
-    // Используем polling версию для маленьких данных — это быстрее и без паники
-    esp_err_t ret = spi_device_polling_transmit(eeprom_handle, &t);
-    
+    esp_err_t ret = spi_device_polling_transmit(flash_spi, &t);
     if (ret == ESP_OK) {
-        // Данные от EEPROM начнут поступать сразу после передачи адреса
-        // Т.е. на 4-м байте транзакции
-        data = rx_buf[3];
+        // ID начинается со второго байта (rx_data[1]), т.к. первый был во время отправки 0x9F
+        ESP_LOGI("FLASH", "JEDEC ID: %02X %02X %02X", rx_data[1], rx_data[2], rx_data[3]);
     }
-    return data;
 }
 
-void eeprom_write_byte(uint16_t address, uint8_t data) 
+uint8_t flash_read_status() 
 {
-    wait_for_eeprom_ready();
-    // 1. Включаем запись
-    eeprom_write_enable();
-
-    // 2. Сама запись
-    uint8_t addr_h = (address >> 8) & 0xFF;
-    uint8_t addr_l = address & 0xFF;
-    spi_transaction_t write_t = {
-        .length = 8 * 4,
-        .tx_data = {CMD_WRITE, addr_h, addr_l, data},
-        .flags = SPI_TRANS_USE_TXDATA
-    };
-    spi_device_polling_transmit(eeprom_handle, &write_t);
-
-    // 3. Ждем, пока WIP (Write In Progress) станет 0
-}
-
-// Функция записи u32
-void eeprom_write_u32(uint16_t address, uint32_t data) 
-{
-    wait_for_eeprom_ready(); 
-
-    // 1. WREN (Включение записи)
-	eeprom_write_enable();
-    // 2. Подготовка буфера: CMD(1) + ADDR(2) + DATA(4) = 7 байт
-    static uint8_t tx_buf[7];
-    tx_buf[0] = CMD_WRITE;
-    tx_buf[1] = (address >> 8) & 0xFF;
-    tx_buf[2] = address & 0xFF;
-    // Пишем в Big Endian (стандарт для EEPROM)
-    tx_buf[3] = (data >> 24) & 0xFF;
-    tx_buf[4] = (data >> 16) & 0xFF;
-    tx_buf[5] = (data >> 8) & 0xFF;
-    tx_buf[6] = data & 0xFF;
-
-    spi_transaction_t t = { .length = 8 * 7, .tx_buffer = tx_buf };
-    spi_device_polling_transmit(eeprom_handle, &t);
-}
-
-// Функция чтения u32
-uint32_t eeprom_read_u32(uint16_t address) 
-{
-    wait_for_eeprom_ready();
-    static uint8_t tx_buf[7] = {CMD_READ, 0, 0, 0, 0, 0, 0};
-    static uint8_t rx_buf[7];
+    uint8_t cmd = 0x05;
+    uint8_t status = 0;
     
-    tx_buf[1] = (address >> 8) & 0xFF;
-    tx_buf[2] = address & 0xFF;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 8;
+    t.tx_buffer = &cmd;
+    // Используем rxlength, чтобы прочитать ответ сразу за командой
+    t.rxlength = 8;
+    t.rx_buffer = &status;
+    
+    spi_device_polling_transmit(flash_spi, &t);
+    return status;
+}
 
-    spi_transaction_t t = {
-        .length = 8 * 7,
-		.rxlength = 8*7,
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf
+void flash_wait_until_ready() 
+{
+    // Ждем, пока нулевой бит (WIP) не станет 0
+    while (flash_read_status() & 0x01) {
+        // Минимальная пауза, чтобы не забивать шину SPI проверками
+        vTaskDelay(1); 
+    }
+}
+
+void flash_write_enable() {
+    uint8_t cmd = 0x06;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 8;
+    t.tx_buffer = &cmd;
+    flash_wait_until_ready(); // Ждем завершения предыдущих дел
+    spi_device_polling_transmit(flash_spi, &t);
+}
+
+void flash_erase_sector(uint32_t addr) 
+{
+    flash_wait_until_ready(); // Ждем завершения предыдущих дел
+    flash_write_enable();
+    
+    uint8_t tx_data[4] = {
+        0x20,
+        (uint8_t)(addr >> 16),
+        (uint8_t)(addr >> 8),
+        (uint8_t)addr
     };
 
-    if (spi_device_polling_transmit(eeprom_handle, &t) == ESP_OK) {
-        // КРИТИЧЕСКИЙ МОМЕНТ: Собираем данные с индекса 3!
-        return ((uint32_t)rx_buf[3] << 24) |
-               ((uint32_t)rx_buf[4] << 16) |
-               ((uint32_t)rx_buf[5] << 8)  |
-                (uint32_t)rx_buf[6];
-    }
-    return 0;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 32;
+    t.tx_buffer = tx_data;
+    spi_device_polling_transmit(flash_spi, &t);
 }
 
-void eeprom_write_float(uint16_t address, float value) 
-{
-    uint32_t raw_bits;
-    memcpy(&raw_bits, &value, 4);
-	eeprom_write_u32(address,raw_bits);
-}
-
-float eeprom_read_float(uint16_t address) 
-{
-    uint32_t temp = eeprom_read_u32(address);
-    float val;
-    memcpy(&val, &temp, 4); // Возвращаем биты обратно во float
-    return val;
-}
-
-void eeprom_erase_range(uint16_t start_addr, uint16_t length) 
-{
-    uint16_t current_addr = start_addr;
-    uint16_t remaining = length;
-
-    ESP_LOGI("EEPROM", "Стирание %d байт с адреса 0x%04X...", length, start_addr);
-
-    while (remaining > 0) {
-        wait_for_eeprom_ready(); // Проверка перед каждой записью
-
-        // WREN
-		eeprom_write_enable();
-        // Определяем, сколько писать в этой итерации (не более 64 байт и не заходя за границу страницы)
-        // Для простоты на макетке будем писать по 16 байт — это гарантированно быстро и безопасно
-#define ONE_COUNT 64 //Количество байт за одну запись.
-        uint8_t chunk = (remaining > ONE_COUNT) ? ONE_COUNT : remaining;
-        
-        uint8_t tx_buf[3+ONE_COUNT]; // CMD(1) + ADDR(2) + DATA(16)
-        tx_buf[0] = CMD_WRITE;
-        tx_buf[1] = (current_addr >> 8) & 0xFF;
-        tx_buf[2] = current_addr & 0xFF;
-        memset(&tx_buf[3], 0xFF, chunk);
-
-        spi_transaction_t t = {
-            .length = 8 * (3 + chunk),
-            .tx_buffer = tx_buf
-        };
-        
-        spi_device_polling_transmit(eeprom_handle, &t);
-
-        current_addr += chunk;
-        remaining -= chunk;
-    }
-    
-//    wait_for_eeprom_ready(); // Ждем финализации последней записи 
-    ESP_LOGI("EEPROM", "Стирание завершено.");
-}
