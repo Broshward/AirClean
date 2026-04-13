@@ -30,4 +30,3 @@ float temperature_calc(uint8_t *data);
 void send_sensors_values(void);
 void get_narodmon_string(char *data, size_t max_len);
 
-extern bool is_ble_ready;

@@ -7,16 +7,11 @@
 #include "esp_log.h"
 
 #include "sensor.h"
-#include "i2c.h"
 #include "tasks.h"
+#include "blufi.h"
+#include "spi.h"
 
 const char *SENSOR_TAG = "Sensors";
-
-// Counter struct
-typedef struct {
-    const char* type_prefix; // "T", "L", "H", "P"...
-    int current_index;       // Текущий номер (1, 2, 3...)
-} type_counter_t;
 
 #define MAX_SENSORS 32 
 
@@ -150,9 +145,180 @@ void get_narodmon_string(char *data, size_t max_len)
     strcat(data, "##");
 }
 
-#define TEMPERATURE_RESOLUTION		0.0625 
-float temperature_calc(uint8_t *data)
+void flash_log_all_sensors(uint32_t timestamp) 
 {
-	return ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
+    uint8_t buf[128]; // Временный буфер для сборки пакета
+    uint8_t ptr = 0;
+
+    buf[ptr++] = 0xAA;      // Маркер
+    buf[ptr++] = 0;         // Резерв под длину (заполним позже)
+    
+    // Пишем время (4 байта)
+    memcpy(&buf[ptr], &timestamp, 4);
+    ptr += 4;
+
+    // Пишем все активные датчики
+    for (int i = 0; i < sensor_count; i++) {
+		buf[ptr++] = all_sensors[i].id; // 1 байт - ID
+
+		float temp_val;
+		
+		// Приводим все типы к float для унификации в логе
+		switch (all_sensors[i].val_type) {
+			case VAL_TYPE_FLOAT:
+				temp_val = all_sensors[i].value.f;
+				break;
+			case VAL_TYPE_INT:
+				temp_val = (float)all_sensors[i].value.i;
+				break;
+			case VAL_TYPE_BOOL:
+				temp_val = all_sensors[i].value.b ? 1.0f : 0.0f;
+				break;
+			default:
+				temp_val = 0.0f;
+		}
+
+		memcpy(&buf[ptr], &temp_val, 4);
+		ptr += 4;
+	}
+
+    buf[1] = ptr - 2; // Записываем реальную длину данных (без маркера и самой длины)
+
+    // Считаем CRC8 (простая сумма всех байт для примера)
+    uint8_t crc = 0;
+    for (int i = 0; i < ptr; i++) crc += buf[i];
+    buf[ptr++] = crc;
+
+    // Теперь пишем буфер на флешку по адресу head
+     flash_write_data(buf, ptr);
+    
+    // Обновляем head в памяти часов
+    // update_flash_ptr_in_sram(current_head_addr + ptr);
+}
+
+bool flash_get_next_packet(uint8_t *out_buf, uint16_t *out_len) 
+{
+    // 1. Проверяем, есть ли вообще данные (догнал ли tail голову?)
+    if (current_tail_addr == current_head_addr) return false;
+
+    uint8_t header[2]; // Маркер и длина
+    flash_read_data(current_tail_addr, header, 2);
+
+    if (header[0] != 0xAA) {
+        // Ой-ой, мы потеряли синхронизацию! 
+        // В реальной жизни тут нужно искать следующий 0xAA, 
+        // но пока просто сдвинем tail на 1.
+        current_tail_addr = (current_tail_addr + 1) % FLASH_TOTAL_SIZE;
+        return false;
+    }
+
+    uint8_t data_len = header[1];
+    uint16_t full_packet_size = data_len + 3; // 0xAA + Len + Data + CRC
+
+    // 2. Читаем весь пакет целиком (включая разрывы через край флешки)
+    flash_read_data(current_tail_addr, out_buf, full_packet_size);
+
+    // 3. Проверяем контрольную сумму (простая сумма всех байт)
+    uint8_t sum = 0;
+    for (int i = 0; i < full_packet_size - 1; i++) sum += out_buf[i];
+
+    if (sum != out_buf[full_packet_size - 1]) {
+        ESP_LOGE("FLASH", "CRC error at addr %d", current_tail_addr);
+        current_tail_addr = (current_tail_addr + 1) % FLASH_TOTAL_SIZE;
+        return false;
+    }
+
+    *out_len = full_packet_size;
+    return true; // Пакет успешно прочитан и валиден!
+}
+
+const char* get_label_by_id(int id) 
+{
+    for (int i = 0; i < sensor_count; i++) {
+        if (all_sensors[i].id == id) return all_sensors[i].label;
+    }
+    return "unknown";
+}
+
+const char* get_type_by_id(int id) 
+{
+    for (int i = 0; i < sensor_count; i++) {
+        if (all_sensors[i].id == id) return all_sensors[i].type_name;
+    }
+    return "U"; // Unknown
+}
+
+bool get_one_flash_packet_string(char *out_str, size_t free_space) 
+{
+    uint8_t packet[259]; 
+    uint16_t p_len;
+    uint32_t temp_tail = current_tail_addr; // Используем локальный указатель для поиска
+
+    while (temp_tail != current_head_addr) {
+        uint8_t header[2];
+        flash_read_data(temp_tail, header, 2);
+
+        if (header[0] != 0xAA) {
+            temp_tail = (temp_tail + 1) % FLASH_TOTAL_SIZE;
+            continue;
+        }
+
+        p_len = header[1] + 3; 
+        flash_read_data(temp_tail, packet, p_len);
+
+        // Проверка CRC
+        uint8_t sum = 0;
+        for (int i = 0; i < p_len - 1; i++) sum += packet[i];
+        if (sum != packet[p_len - 1]) {
+            temp_tail = (temp_tail + 1) % FLASH_TOTAL_SIZE;
+            continue;
+        }
+
+        // Пакет валиден. Теперь проверяем, влезет ли он в ТЕКСТОВОМ виде
+        char temp_str[512] = ""; // Временная строка для одного пакета
+        uint32_t timestamp;
+        memcpy(&timestamp, &packet[2], 4);
+        
+        int ptr = 6;
+        while (ptr < p_len - 1) {
+            uint8_t id = packet[ptr++];
+            float val;
+            memcpy(&val, &packet[ptr], 4);
+            ptr += 4;
+
+            char line[128];
+            snprintf(line, sizeof(line), "#%s%d#%.2f#%lu#%s\n", 
+                     get_type_by_id(id), id, val, timestamp, get_label_by_id(id));
+            strcat(temp_str, line);
+        }
+
+        // ГЛАВНАЯ ПРОВЕРКА:
+        if (strlen(temp_str) < free_space) {
+            strcpy(out_str, temp_str);
+            current_tail_addr = (temp_tail + p_len) % FLASH_TOTAL_SIZE; // Сдвигаем хвост
+            return true;
+        } else {
+            // Не влезает в оставшееся место основного буфера.
+            // Хвост НЕ двигаем, выходим.
+            return false; 
+        }
+    }
+    return false;
+}
+
+void _get_narodmon_string(char *data, size_t max_len) 
+{
+    // 1. Текущие данные
+//    fill_header_and_current_values(data, max_len);
+
+    char one_packet_buf[512];
+
+    // 2. Добавляем из истории, пока добытчик говорит "True"
+    // Мы передаем (max_len - текущая длина - запас под "##")
+    while (get_one_flash_packet_string(one_packet_buf, max_len - strlen(data) - 3)) {
+        strcat(data, one_packet_buf);
+    }
+
+    strcat(data, "##");
 }
 
