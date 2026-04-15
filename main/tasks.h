@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "esp_err.h"
+#include "esp_bt_defs.h"
 
 
 void configure_led(void);
@@ -18,6 +19,9 @@ extern float gl_luminosity;
 extern float gl_temp;
 extern float gl_chip_temp;
 extern uint8_t gl_temperature[2];
+extern uint16_t g_blufi_conn_id; 
+extern esp_bd_addr_t remote_bda_global;
+extern QueueHandle_t blufi_tx_queue;
 
 typedef struct {
     uint8_t *payload; // Динамический буфер для данных

@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include "driver/temperature_sensor.h"
 #include "driver/gpio.h"
+#include "esp_gap_ble_api.h"
 
 #include "tasks.h"
 #include "blufi.h"
@@ -29,8 +30,26 @@ float gl_temp;
 float gl_chip_temp;
 uint8_t gl_temperature[2];
 
-static QueueHandle_t blufi_tx_queue = NULL;
+static const char *TCP_TAG = "TCP_IP";
+RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
+QueueHandle_t blufi_tx_queue = NULL;
+static uint32_t last_send_attempt_time = 0;
+
+#define BLINK_GPIO 8
+void configure_led(void)
+{
+    gpio_reset_pin(BLINK_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(BLINK_GPIO, 1);
+}
+
+#define TEMPERATURE_RESOLUTION		0.0625 
+float temperature_calc(uint8_t *data)
+{
+	return ((int8_t)data[0]) + (data[1]>>4)*TEMPERATURE_RESOLUTION;
+}
 
 float get_kty81_210_temp(int in_volt)
 {
@@ -129,27 +148,50 @@ void sensorsTask(void *pvParameters)
     }
 }
 
-static const char *TCP_TAG = "TCP_IP";
-
 void after_success()
 {
-//	gpio_set_level(BLINK_GPIO, 0); // LED is on
+//    ESP_LOGI(TCP_TAG, "Narodmon: Success! Syncing state...");
+
+    // 1. Фиксируем сдвиг хвоста
+    // get_narodmon_string уже сдвинула current_tail_addr в ОЗУ в процессе сборки
+	if (prev_tail_addr != current_tail_addr){
+		save_tail_to_eeprom(current_tail_addr);
+		prev_tail_addr = current_tail_addr;
+	}
+
+    // 2. Обновляем время последней УДАЧНОЙ синхронизации в SRAM часов
+    // Это нам пригодится, чтобы понимать, как долго мы без связи
+//    time_t now;
+//    time(&now);
+//    mcp_write_bytes(MCP79410_RTC_RAM_ADDR, 0x20, (uint8_t*)&now, 4);
+
+	gpio_set_level(BLINK_GPIO, 0); // LED is on
 }
 void after_failure()
 {
-//	gpio_set_level(BLINK_GPIO, 1); // LED is off
+    ESP_LOGE(TCP_TAG, "Failure sendig to server.");
+
+    // 1. Откатываем хвост (не подтверждаем отправку из флешки)
+    current_tail_addr = read_tail_from_eeprom();
+
+    // 2. Проверяем время и пишем текущие показания в лог (если время ок)
+	flash_log_all_sensors(gl_last_send_time);
+	ESP_LOGI(TCP_TAG, "Current sensors state saved to Flash.");
+
+	gpio_set_level(BLINK_GPIO, 1); // LED is off
 }
 
-#define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105"						// Debug IP-address
+
+#define HOST_IP_ADDR  "192.168.43.105" //"narodmon.com"
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 1000*60*5+1 // Perod between sends
+#define TIME_PERIOD 1000*60*1+2 // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
-RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
 void tcp_clientTask(void *pvParameters)
 {
-    configure_led();
 	ulTaskNotifyTake(true, portMAX_DELAY); // Wait for time syncing
+    configure_led();
+	init_flash_logger();
 	gl_last_send_time = load_last_send_time(); //Load from nvs last sending time
 	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
 
@@ -164,7 +206,7 @@ void tcp_clientTask(void *pvParameters)
 		time(&now);
 		printf("Time NOW: %d\n", (int)now);
 		printf("Time of last send: %d\n", (int)gl_last_send_time);
-		if (now-gl_last_send_time<0) //Последняя передача в будущем
+		if (now-gl_last_send_time<0 || gl_last_send_time==0) //Последняя передача в будущем или мы считали 0
 			vTaskDelay(TIME_PERIOD);
 		else if (now-gl_last_send_time < TIME_PERIOD/1000) {
 			int time_to_wait = (TIME_PERIOD-1000*(now-gl_last_send_time)); // ms
@@ -229,7 +271,7 @@ void tcp_clientTask(void *pvParameters)
             }
 
 			struct timeval tv;
-			tv.tv_sec = 10; // 5 секунд ждать ответа
+			tv.tv_sec = 10; // 10 секунд ждать ответа
 			tv.tv_usec = 0;
 			setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -247,10 +289,6 @@ void tcp_clientTask(void *pvParameters)
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
 				if (strcmp(rx_buffer,"OK")) 
 					after_failure();
-//					while(1){
-//						ESP_LOGE(TCP_TAG, "Server return error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: '%s' ", rx_buffer);
-//						vTaskDelay(pdMS_TO_TICKS(1000*100));  // If server return error need to debug
-//					}
 				else{
 					after_success();
 				}
@@ -310,38 +348,67 @@ void timeTask(void *pvParameters)
 
 void spi_test(void *pvParameters)
 {
-	init_external_flash_spi();
+	//init_external_flash_spi();
+	read_flash_id();
 	int i=0;
 	while(1){
-		read_flash_id();
-		vTaskDelay(pdMS_TO_TICKS(1000));
+		vTaskDelay(pdMS_TO_TICKS(500));
 		i+=4;
 	}
 }
 
+uint16_t g_blufi_conn_id = 0xffff; 
+esp_bd_addr_t remote_bda_global;
+
+//Эта задача нужна для того, чтобы разблокировать blufi_sender_task когда она зависнет.
+void blufi_monitor_task(void *pvParameters) 
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Проверка раз в 5 секунд
+		//ESP_LOGI("MONITOR","I am Monitor!!!");
+
+        if (last_send_attempt_time != 0) {
+            uint32_t duration = (xTaskGetTickCount() - last_send_attempt_time) * portTICK_PERIOD_MS;
+            
+            if (duration > 10000) { // Если функция висит дольше 10 сек
+                ESP_LOGE("MONITOR", "BLUFI SEND HANG DETECTED! Force Disconnect...");
+                
+                //esp_ble_gap_disconnect(remote_bda_global); 
+				esp_restart(); // Самый надежный способ очистить зависший DMA/контроллер
+
+                
+                // Сбрасываем метку после дисконнекта 
+				if (g_blufi_conn_id == 0xffff) 
+					last_send_attempt_time = 0; 
+            }
+        }
+    }
+}
+
 void blufi_sender_task(void *pvParameters) 
 {
-    blufi_msg_t msg;
-	blufi_tx_queue = xQueueCreate(10, sizeof(blufi_msg_t));
-    
+	//Создаём очередь сообщений
+	blufi_tx_queue = xQueueCreate(20, sizeof(blufi_msg_t));
+	// Создаём задачу монитор, которая нужна, чтобы разорвать связь, если эта задача зависла.
+	xTaskCreate( blufi_monitor_task, "Custom Data sender monitor", 4096, NULL, 10, NULL); //Task for test SPI
+
+	blufi_msg_t msg;
     while (1) {
-        // Ждем сообщение из очереди
         if (xQueueReceive(blufi_tx_queue, &msg, portMAX_DELAY)) {
+            // Обновляем метку времени ПЕРЕД вызовом
+            last_send_attempt_time = xTaskGetTickCount(); 
             
-            // Пытаемся отправить данные
+			//Если нет подключения не пытаемся ничего слать, просто выкидываем сообщение
+			if (g_blufi_conn_id == 0xffff) {
+                free(msg.payload);
+                continue; 
+            }
+//            ESP_LOGI("BLUFI_TX", "Attempting send...");
             esp_err_t ret = esp_blufi_send_custom_data(msg.payload, msg.length);
             
-            if (ret == ESP_OK) {
-                // Успешно отправлено
-                //ESP_LOGI("BLUFI_TX", "Sent %d bytes", msg.length);
-            } else {
-                // Если возникла ошибка или "wait to send", пробуем повторить ОДИН раз через паузу
-                ESP_LOGW("BLUFI_TX", "Send failed (0x%x), retrying...", ret);
-                vTaskDelay(pdMS_TO_TICKS(100)); 
-                esp_blufi_send_custom_data(msg.payload, msg.length);
-            }
-
-            // Обязательно освобождаем память, которую выделила задача-отправитель
+            // Если мы здесь — функция разблокировалась
+            last_send_attempt_time = 0; 
+            
             free(msg.payload);
         }
     }
@@ -350,6 +417,12 @@ void blufi_sender_task(void *pvParameters)
 esp_err_t queue_blufi_data(uint8_t *data, size_t len) 
 {
     if (blufi_tx_queue == NULL) return ESP_FAIL;
+	
+	// Если нет соединения
+    if (g_blufi_conn_id == 0xffff) {
+        // ESP_LOGD("BLUFI_TX", "No connection, skipping data"); // Опционально для отладки
+        return ESP_ERR_INVALID_STATE; 
+    }
 
     blufi_msg_t msg;
     msg.length = len;

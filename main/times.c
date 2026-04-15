@@ -35,12 +35,14 @@ uint32_t load_last_sync_sntp()
 }
 
 // Колбэк функция, которая сработает при успехе
-void time_sync_notification_cb(struct timeval *tv) {
+void time_sync_notification_cb(struct timeval *tv) 
+{
     ESP_LOGI("SNTP", "Синхронизация с сервером времени прошла успешно!");
     
 	time(&last_sync_sntp);
 	save_last_sync_sntp(last_sync_sntp); //Сохраняем время синхронизации
-	send_last_sync_sntp();
+	if (is_ble_ready)
+		send_last_sync_sntp();
     // Как только время стало актуальным — сразу записываем его в наши часы RTC
     system_time_to_rtc(); 
 }
@@ -143,26 +145,34 @@ void get_current_time_str(char* buf, size_t size)
     strftime(buf, size, "%H:%M:%S", &timeinfo);
 }
 
-void save_last_send_time(uint32_t timestamp) 
+#define RTC_SRAM_SEND_TIME_ADDR 0x20 // Начало SRAM в MCP79410
+void save_last_send_time(time_t last_time) 
 {
-    nvs_handle_t my_handle;
-    // Открываем хранилище с именем "storage"
-    if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
-        nvs_set_u32(my_handle, "last_send", timestamp);
-        nvs_commit(my_handle); // Обязательно фиксируем изменения
-        nvs_close(my_handle);
+    uint32_t t_val = (uint32_t)last_time;
+    // Используем твою i2c_buffer_write. 
+    // Формируем пакет: [адрес в SRAM] + [4 байта времени]
+    uint8_t buf[5];
+    buf[0] = RTC_SRAM_SEND_TIME_ADDR;
+    memcpy(&buf[1], &t_val, 4);
+
+    esp_err_t err = i2c_buffer_write(RTC_handle, buf, 5);
+    if (err == ESP_OK) {
+        ESP_LOGI("RTC_SRAM", "Last send time saved: %ld", last_time);
+    } else {
+        ESP_LOGE("RTC_SRAM", "Failed to save send time!");
     }
 }
-
-uint32_t load_last_send_time() 
+time_t load_last_send_time() 
 {
-    nvs_handle_t my_handle;
-    uint32_t timestamp = 0;
-    if (nvs_open("storage", NVS_READONLY, &my_handle) == ESP_OK) {
-        nvs_get_u32(my_handle, "last_send", &timestamp);
-        nvs_close(my_handle);
+    uint32_t t_val = 0;
+    // Используем твою i2c_register_read
+    esp_err_t err = i2c_register_read(RTC_handle, RTC_SRAM_SEND_TIME_ADDR, (uint8_t*)&t_val, 4);
+    
+    if (err != ESP_OK || t_val < 1767225600) { // Если ошибка или время до 2026 года
+        ESP_LOGW("RTC_SRAM", "Invalid time in SRAM, returning 0");
+        return 0;
     }
-    return timestamp;
+    return (time_t)t_val;
 }
 
 void set_timezone(int offset) 

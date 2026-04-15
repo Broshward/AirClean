@@ -10,9 +10,12 @@
 #define I2C_MASTER_TX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 #define I2C_MASTER_RX_BUF_DISABLE   0                           /*!< I2C master doesn't need buffer */
 
+i2c_master_bus_handle_t i2c_handle;
+
 i2c_master_dev_handle_t MCP9800_handle;
 i2c_master_dev_handle_t RTC_handle;
-i2c_master_bus_handle_t i2c_handle;
+i2c_master_dev_handle_t EEPROM_handle;
+
 
 esp_err_t i2c_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
 {
@@ -70,6 +73,7 @@ void i2c_init()
     i2c_master_init(&i2c_handle);
 	i2c_dev_init(&i2c_handle, MCP9800_SENSOR_ADDR, &MCP9800_handle);
 	i2c_dev_init(&i2c_handle, RTC_ADDRESS, &RTC_handle);
+	i2c_dev_init(&i2c_handle, MCP79410_EEPROM_ADDR, &EEPROM_handle); 
 }
 
 #define CONFIG_REGISTER_VALUE		(0b11<<5)
@@ -79,3 +83,23 @@ void config_MCP9800()
     i2c_register_write_byte(MCP9800_handle, MCP9800_CONFIG_REG, CONFIG_REGISTER_VALUE); //12-bit resolution
 }
 
+esp_err_t mcp_eeprom_write_bytes(uint8_t reg_addr, uint8_t *data, size_t len) 
+{
+    // Нам нужно создать временный буфер: [адрес регистра] + [данные]
+    uint8_t write_buf[len + 1];
+    write_buf[0] = reg_addr;
+    memcpy(&write_buf[1], data, len);
+
+    // Используем твою функцию i2c_buffer_write
+    esp_err_t ret = i2c_buffer_write(EEPROM_handle, write_buf, len + 1);
+    
+    // КРИТИЧЕСКИ ВАЖНО для EEPROM: время на прожиг ячеек
+    vTaskDelay(pdMS_TO_TICKS(10)); 
+    return ret;
+}
+
+esp_err_t mcp_eeprom_read_bytes(uint8_t reg_addr, uint8_t *data, size_t len) 
+{
+    // Используем твою i2c_register_read
+    return i2c_register_read(EEPROM_handle, reg_addr, data, len);
+}

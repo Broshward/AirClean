@@ -67,11 +67,9 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
            transmitted, received, loss, total_time_ms);
 	if(received==0) {
 		gl_ping=false;
-		gpio_set_level(BLINK_GPIO, 1);
 	}
 	else {
 		gl_ping=true;
-		gpio_set_level(BLINK_GPIO, 0);
 	}
     // delete the ping sessions, so that we clean up all resources and can create a new ping session
     // we don't have to call delete function in the callback, instead we can call delete function from other tasks
@@ -135,11 +133,3 @@ hint.ai_flags = AI_ADDRCONFIG; // Использовать только те п�
 }
 
 #define CONFIG_PING_PERIOD 1000*10 // 10 sec
-void configure_led(void)
-{
-    gpio_reset_pin(BLINK_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(BLINK_GPIO, 1);
-}
-

@@ -20,6 +20,8 @@
 #if CONFIG_BT_CONTROLLER_ENABLED || !CONFIG_BT_NIMBLE_ENABLED
 #include "esp_bt.h"
 #endif
+#include "esp_gattc_api.h"
+#include "esp_gatts_api.h"
 
 #include "esp_blufi_api.h"
 #include "blufi.h"
@@ -386,6 +388,26 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         esp_blufi_adv_stop();
         blufi_security_init();
 		// Disable transmit sensors and time flag
+		g_blufi_conn_id = param->connect.conn_id;
+		memcpy(remote_bda_global, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+		ESP_LOGI("BLUFI", "Connected, ID: %d", g_blufi_conn_id);
+
+
+		// НАСТРОЙКА ИНТЕРВАЛА
+		esp_ble_conn_update_params_t conn_params = {0};
+		memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+		conn_params.min_int = 0x20; // Минимум 40 мс (стабильно для большинства тел)
+		conn_params.max_int = 0x40; // Максимум 80 мс
+		conn_params.latency = 0;    // Сколько интервалов телефон может пропустить
+		conn_params.timeout = 600;  // Таймаут связи 6 секунд (600 * 10мс)
+		esp_ble_gap_update_conn_params(&conn_params);
+		ESP_LOGI("BLUFI", "Connection params requested: 40-80ms");
+    
+		// Очищаем очередь 
+		if (blufi_tx_queue != NULL) {
+			xQueueReset(blufi_tx_queue);
+		}
+    
 		is_ble_ready = false;
 		if (ble_stable_timer) {
 			xTimerStart(ble_stable_timer, 0); // Запускаем таймер без блокировки
@@ -400,6 +422,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		//if (ble_stable_timer) {
 		//	xTimerStop(ble_stable_timer, 0);
 		//}	
+		g_blufi_conn_id = 0xffff;
         break;
     case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
         BLUFI_INFO("BLUFI Set WIFI opmode %d\n", param->wifi_mode.op_mode);

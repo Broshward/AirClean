@@ -10,6 +10,7 @@
 #include "tasks.h"
 #include "blufi.h"
 #include "spi.h"
+#include "i2c.h"
 
 const char *SENSOR_TAG = "Sensors";
 
@@ -98,53 +99,6 @@ void send_sensors()
 	queue_blufi_data((uint8_t *)out_buffer, strlen(out_buffer));
 }
 
-void get_narodmon_string(char *data, size_t max_len) 
-{
-    uint8_t mac[6];
-    esp_base_mac_addr_get(mac); 
-	//esp_read_mac(mac, ESP_MAC_BT); // Явно просим адрес блютуза	
-
-    // 1. Заголовок: ID устройства (MAC) и имя
-    snprintf(data, max_len, "#" MACSTR "#AirClean\n", MAC2STR(mac));
-
-    // 2. Служебная информация: BSSID, RSSI
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-	    snprintf(data + strlen(data), max_len - strlen(data), 
-             "#AP:" MACSTR "#%d\n", MAC2STR(ap_info.bssid), ap_info.rssi);
-    }
-
-    // 3. Динамический опрос всех датчиков из нашего массива
-    for (int i = 0; i < sensor_count; i++) {
-        char sensor_line[64];
-        
-        // Формируем уникальный ключ датчика (например, T1, T2 или по его ID)
-        // Народмон любит короткие ключи, поэтому используем type_name + ID
-        if (all_sensors[i].val_type == VAL_TYPE_FLOAT) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%.2f#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.f, all_sensors[i].label);
-        } 
-        else if (all_sensors[i].val_type == VAL_TYPE_BOOL) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.b ? 1 : 0, all_sensors[i].label);
-        }
-        else if (all_sensors[i].val_type == VAL_TYPE_INT) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.i, all_sensors[i].label);
-        }
-        // Добавляем строку в общий буфер, если есть место
-        if (strlen(data) + strlen(sensor_line) < max_len - 3) {
-            strcat(data, sensor_line);
-        }
-    }
-
-    // 4. Финальная точка пакета
-    strcat(data, "##");
-}
-
 void flash_log_all_sensors(uint32_t timestamp) 
 {
     uint8_t buf[128]; // Временный буфер для сборки пакета
@@ -192,44 +146,8 @@ void flash_log_all_sensors(uint32_t timestamp)
     // Теперь пишем буфер на флешку по адресу head
      flash_write_data(buf, ptr);
     
-    // Обновляем head в памяти часов
-    // update_flash_ptr_in_sram(current_head_addr + ptr);
-}
-
-bool flash_get_next_packet(uint8_t *out_buf, uint16_t *out_len) 
-{
-    // 1. Проверяем, есть ли вообще данные (догнал ли tail голову?)
-    if (current_tail_addr == current_head_addr) return false;
-
-    uint8_t header[2]; // Маркер и длина
-    flash_read_data(current_tail_addr, header, 2);
-
-    if (header[0] != 0xAA) {
-        // Ой-ой, мы потеряли синхронизацию! 
-        // В реальной жизни тут нужно искать следующий 0xAA, 
-        // но пока просто сдвинем tail на 1.
-        current_tail_addr = (current_tail_addr + 1) % FLASH_TOTAL_SIZE;
-        return false;
-    }
-
-    uint8_t data_len = header[1];
-    uint16_t full_packet_size = data_len + 3; // 0xAA + Len + Data + CRC
-
-    // 2. Читаем весь пакет целиком (включая разрывы через край флешки)
-    flash_read_data(current_tail_addr, out_buf, full_packet_size);
-
-    // 3. Проверяем контрольную сумму (простая сумма всех байт)
-    uint8_t sum = 0;
-    for (int i = 0; i < full_packet_size - 1; i++) sum += out_buf[i];
-
-    if (sum != out_buf[full_packet_size - 1]) {
-        ESP_LOGE("FLASH", "CRC error at addr %d", current_tail_addr);
-        current_tail_addr = (current_tail_addr + 1) % FLASH_TOTAL_SIZE;
-        return false;
-    }
-
-    *out_len = full_packet_size;
-    return true; // Пакет успешно прочитан и валиден!
+    // Обновляем head в eeprom-памяти часов
+	save_head_to_eeprom(current_head_addr + ptr);
 }
 
 const char* get_label_by_id(int id) 
@@ -306,19 +224,111 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
     return false;
 }
 
-void _get_narodmon_string(char *data, size_t max_len) 
+void get_narodmon_string(char *data, size_t max_len) 
 {
     // 1. Текущие данные
-//    fill_header_and_current_values(data, max_len);
+    uint8_t mac[6];
+    esp_base_mac_addr_get(mac); 
+	//esp_read_mac(mac, ESP_MAC_BT); // Явно просим адрес блютуза	
 
+    // 1. Заголовок: ID устройства (MAC) и имя
+    snprintf(data, max_len, "#" MACSTR "#AirClean\n", MAC2STR(mac));
+
+    // 2. Служебная информация: BSSID, RSSI
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+	    snprintf(data + strlen(data), max_len - strlen(data), 
+             "#AP:" MACSTR "#%d\n", MAC2STR(ap_info.bssid), ap_info.rssi);
+    }
+
+    // 3. Динамический опрос всех датчиков из нашего массива
+    for (int i = 0; i < sensor_count; i++) {
+        char sensor_line[64];
+        
+        // Формируем уникальный ключ датчика (например, T1, T2 или по его ID)
+        // Народмон любит короткие ключи, поэтому используем type_name + ID
+        if (all_sensors[i].val_type == VAL_TYPE_FLOAT) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%.2f#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.f, all_sensors[i].label);
+        } 
+        else if (all_sensors[i].val_type == VAL_TYPE_BOOL) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.b ? 1 : 0, all_sensors[i].label);
+        }
+        else if (all_sensors[i].val_type == VAL_TYPE_INT) {
+            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
+                     all_sensors[i].type_name, all_sensors[i].id, 
+                     all_sensors[i].value.i, all_sensors[i].label);
+        }
+        // Добавляем строку в общий буфер, если есть место
+        if (strlen(data) + strlen(sensor_line) < max_len - 3) {
+            strcat(data, sensor_line);
+        }
+    }
+
+	// Выгрузка истории (если она есть)
     char one_packet_buf[512];
 
-    // 2. Добавляем из истории, пока добытчик говорит "True"
+    // Добавляем из истории, пока get_one_flash_packet_string говорит "True"
     // Мы передаем (max_len - текущая длина - запас под "##")
     while (get_one_flash_packet_string(one_packet_buf, max_len - strlen(data) - 3)) {
         strcat(data, one_packet_buf);
     }
 
     strcat(data, "##");
+}
+
+#define EEPROM_ADDR_HEAD 0x00
+#define EEPROM_ADDR_TAIL 0x04
+
+void save_head_to_eeprom(uint32_t head) 
+{
+    mcp_eeprom_write_bytes(EEPROM_ADDR_HEAD, (uint8_t*)&head, 4);
+}
+
+void save_tail_to_eeprom(uint32_t tail) 
+{
+    mcp_eeprom_write_bytes(EEPROM_ADDR_TAIL, (uint8_t*)&tail, 4);
+}
+
+uint32_t read_head_from_eeprom() 
+{
+    uint32_t head = 0;
+	mcp_eeprom_read_bytes(EEPROM_ADDR_HEAD, (uint8_t*)&head, 4);
+    
+    // Если EEPROM пустой (FF) или адрес больше размера флешки
+    if (head >= FLASH_TOTAL_SIZE) {
+        ESP_LOGW("EEPROM", "Invalid head in EEPROM, resetting to 0");
+        return 0;
+    }
+    return head;
+}
+
+uint32_t read_tail_from_eeprom() 
+{
+    uint32_t tail = 0;
+	mcp_eeprom_read_bytes(EEPROM_ADDR_TAIL, (uint8_t *)&tail, 4);
+    
+    if (tail >= FLASH_TOTAL_SIZE) {
+        ESP_LOGW("EEPROM", "Invalid tail in EEPROM, resetting to 0");
+        return 0;
+    }
+    return tail;
+}
+
+void init_flash_logger() 
+{
+    // 1. Инициализируем SPI для флешки
+    init_external_flash_spi();
+    
+    // 2. Читаем последние координаты из EEPROM
+    current_head_addr = read_head_from_eeprom();
+    current_tail_addr = read_tail_from_eeprom();
+	prev_tail_addr = current_tail_addr;
+    
+    ESP_LOGI("LOGGER", "Flash Logger Ready. Head: %u, Tail: %u", 
+             current_head_addr, current_tail_addr);
 }
 

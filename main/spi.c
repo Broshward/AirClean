@@ -14,6 +14,7 @@ spi_device_handle_t flash_spi;
 
 uint32_t current_head_addr = 0;
 uint32_t current_tail_addr = 0;
+uint32_t prev_tail_addr = 0;
 
 void init_external_flash_spi() 
 {
@@ -206,7 +207,6 @@ void spi_flash_read_raw(uint32_t addr, uint8_t *dest, uint16_t len)
 
 void flash_read_data(uint32_t addr, uint8_t *dest, uint16_t len) 
 {
-    uint16_t read_now = 0;
     uint32_t curr_addr = addr;
 
     // Если адрес за пределами (например, после прошлой записи), сбрасываем в 0

@@ -29,4 +29,10 @@ void sensor_set_value(int id, value_type_t v_type, const char* name, const char*
 float temperature_calc(uint8_t *data);
 void send_sensors_values(void);
 void get_narodmon_string(char *data, size_t max_len);
+void flash_log_all_sensors(uint32_t timestamp);
 
+void save_head_to_eeprom(uint32_t head);
+void save_tail_to_eeprom(uint32_t tail);
+uint32_t read_head_from_eeprom();
+uint32_t read_tail_from_eeprom();
+void init_flash_logger();
