@@ -14,7 +14,6 @@ spi_device_handle_t flash_spi;
 
 uint32_t current_head_addr = 0;
 uint32_t current_tail_addr = 0;
-uint32_t prev_tail_addr = 0;
 
 void init_external_flash_spi() 
 {
@@ -28,7 +27,7 @@ void init_external_flash_spi()
     };
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1000 * 10, // 10 MHz
+        .clock_speed_hz = 1000 * 1000, // 10 MHz
         .mode = 0,                         // SPI mode 0
         .spics_io_num = PIN_NUM_CS,
         .queue_size = 7,
@@ -65,19 +64,21 @@ void read_flash_id()
 
 uint8_t flash_read_status() 
 {
-    uint8_t cmd = 0x05;
-    uint8_t status = 0;
-    
+    uint8_t tx_data[2] = {0x05, 0x00}; // Команда + пустой байт для тактирования ответа
+    uint8_t rx_data[2] = {0x00, 0x00};
+
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
-    t.length = 8;
-    t.tx_buffer = &cmd;
-    // Используем rxlength, чтобы прочитать ответ сразу за командой
-    t.rxlength = 8;
-    t.rx_buffer = &status;
-    
-    spi_device_polling_transmit(flash_spi, &t);
-    return status;
+    t.length = 16; // 8 бит команда + 8 бит ответ
+    t.tx_buffer = tx_data;
+    t.rx_buffer = rx_data;
+
+    esp_err_t ret = spi_device_polling_transmit(flash_spi, &t);
+    if (ret == ESP_OK) {
+        // Статус-байт прилетает в rx_data[1], пока мы шлем нули во втором байте tx_data
+        return rx_data[1];
+    }
+    return 0xFF; // Ошибка
 }
 
 void flash_wait_until_ready() 
@@ -89,13 +90,15 @@ void flash_wait_until_ready()
     }
 }
 
-void flash_write_enable() {
+void flash_write_enable() 
+{
     uint8_t cmd = 0x06;
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
-    t.length = 8;
+    t.length = 8; // Только 8 бит команды
     t.tx_buffer = &cmd;
-    flash_wait_until_ready(); // Ждем завершения предыдущих дел
+    
+    // При записи одного байта ответ нам не важен
     spi_device_polling_transmit(flash_spi, &t);
 }
 
@@ -118,20 +121,29 @@ void flash_erase_sector(uint32_t addr)
     spi_device_polling_transmit(flash_spi, &t);
 }
 
-void spi_flash_send_raw(uint8_t *cmd, uint8_t cmd_len, uint8_t *data, uint16_t data_len) 
+void flash_write_raw(uint32_t addr, uint8_t *data, uint16_t len) 
 {
+    flash_wait_until_ready(); // Ждем завершения предыдущих дел
+    flash_write_enable();
+
+    uint8_t tx_buf[256 + 4];
+    
+    tx_buf[0] = 0x02; // Page Program
+    tx_buf[1] = (addr >> 16) & 0xFF;
+    tx_buf[2] = (addr >> 8) & 0xFF;
+    tx_buf[3] = addr & 0xFF;
+    
+    memcpy(&tx_buf[4], data, len);
+
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
-    
-    // Если данных мало, можно собрать в один буфер, если много — используем DMA
-    uint8_t total_buf[256 + 4]; 
-    memcpy(total_buf, cmd, cmd_len);
-    memcpy(total_buf + cmd_len, data, data_len);
+    t.length = (4 + len) * 8;
+    t.tx_buffer = tx_buf;
+    // rx_buffer можно не указывать, если нам не важен ответ при записи
 
-    t.length = (cmd_len + data_len) * 8;
-    t.tx_buffer = total_buf;
     spi_device_polling_transmit(flash_spi, &t);
 }
+
 
 void flash_write_data(uint8_t *data, uint16_t len) 
 {
@@ -159,14 +171,8 @@ void flash_write_data(uint8_t *data, uint16_t len)
         flash_wait_until_ready();
         flash_write_enable();
 
-        uint8_t cmd_addr[4];
-        cmd_addr[0] = 0x02; // Page Program
-        cmd_addr[1] = (current_head_addr >> 16) & 0xFF;
-        cmd_addr[2] = (current_head_addr >> 8) & 0xFF;
-        cmd_addr[3] = current_head_addr & 0xFF;
-
         // Отправляем пакет
-        spi_flash_send_raw(cmd_addr, 4, &data[sent], to_write);
+        flash_write_raw(current_head_addr, &data[sent], to_write);
 
         // Сдвигаем глобальный адрес и счетчик отправленного
         current_head_addr += to_write;
@@ -174,34 +180,33 @@ void flash_write_data(uint8_t *data, uint16_t len)
     }
 }
 
-void spi_flash_read_raw(uint32_t addr, uint8_t *dest, uint16_t len) 
+void flash_read_raw(uint32_t addr, uint8_t *dest, uint16_t len) 
 {
+    flash_wait_until_ready(); // Ждем завершения предыдущих дел
+
+    // Создаем временный буфер для передачи (макс пакет + 4 байта заголовка)
+    // Используем динамическую длину или фиксированный запас
+    uint8_t tx_buf[259 + 4] = {0}; 
+    uint8_t rx_buf[259 + 4] = {0};
+
+    tx_buf[0] = 0x03; // Команда чтения
+    tx_buf[1] = (addr >> 16) & 0xFF;
+    tx_buf[2] = (addr >> 8) & 0xFF;
+    tx_buf[3] = addr & 0xFF;
+
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
-
-    // Формируем заголовок: команда 0x03 + 3 байта адреса
-    uint8_t cmd_buf[4];
-    cmd_buf[0] = 0x03; // Read Data
-    cmd_buf[1] = (addr >> 16) & 0xFF;
-    cmd_buf[2] = (addr >> 8) & 0xFF;
-    cmd_buf[3] = addr & 0xFF;
-
-    // В SPI транзакциях мы можем использовать 'user' или 'address' поля,
-    // но для простоты и надежности (учитывая DMA) сделаем так:
     
-    // Сначала отправляем адрес (4 байта) без поднятия CS в конце
-    // (Или используем одну транзакцию с rxlength)
-    
-    t.length = 8 * 4;       // Команда + Адрес (32 бита)
-    t.tx_buffer = cmd_buf;
-    t.rxlength = 8 * len;  // Сколько бит хотим прочитать ПОСЛЕ команды
-    t.rx_buffer = dest;
+    // Общая длина транзакции в битах: (4 байта заголовка + данные) * 8
+    t.length = (4 + len) * 8; 
+    t.tx_buffer = tx_buf;
+    t.rx_buffer = rx_buf;
 
-    // Поллинг-транзакция (блокирует поток до завершения, что для SPI быстро)
     esp_err_t ret = spi_device_polling_transmit(flash_spi, &t);
     
-    if (ret != ESP_OK) {
-        ESP_LOGE("FLASH", "SPI Read Error: %d", ret);
+    if (ret == ESP_OK) {
+        // Копируем данные, пропуская первые 4 байта (там был "эхо" команды и адреса)
+        memcpy(dest, &rx_buf[4], len);
     }
 }
 
@@ -216,13 +221,13 @@ void flash_read_data(uint32_t addr, uint8_t *dest, uint16_t len)
     if (curr_addr + len > FLASH_TOTAL_SIZE) {
         // Читаем первую часть до конца флешки
         uint16_t part1 = FLASH_TOTAL_SIZE - curr_addr;
-        spi_flash_read_raw(curr_addr, dest, part1);
+        flash_read_raw(curr_addr, dest, part1);
         
         // Читаем вторую часть с самого начала
-        spi_flash_read_raw(0, dest + part1, len - part1);
+        flash_read_raw(0, dest + part1, len - part1);
     } else {
         // Пакет лежит ровно, читаем одним куском
-        spi_flash_read_raw(curr_addr, dest, len);
+        flash_read_raw(curr_addr, dest, len);
     }
 }
 

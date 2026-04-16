@@ -20,6 +20,8 @@ const char *SENSOR_TAG = "Sensors";
 static sensor_t all_sensors[MAX_SENSORS]; 
 static int sensor_count = 0;
 
+uint32_t prev_tail_addr = 0; // Это нужно, чтобы не перезаписывать одно и тоже значение
+
 void sensor_set_value(int id, value_type_t v_type, const char* name, const char* label, sensor_data_t new_val) 
 {
     // 1. Сначала ищем: может такой датчик уже есть?
@@ -101,7 +103,7 @@ void send_sensors()
 
 void flash_log_all_sensors(uint32_t timestamp) 
 {
-    uint8_t buf[128]; // Временный буфер для сборки пакета
+    uint8_t buf[259]; // Временный буфер для сборки пакета
     uint8_t ptr = 0;
 
     buf[ptr++] = 0xAA;      // Маркер
@@ -147,7 +149,7 @@ void flash_log_all_sensors(uint32_t timestamp)
      flash_write_data(buf, ptr);
     
     // Обновляем head в eeprom-памяти часов
-	save_head_to_eeprom(current_head_addr + ptr);
+	save_head_to_eeprom(current_head_addr+ptr);
 }
 
 const char* get_label_by_id(int id) 
@@ -193,7 +195,7 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
         }
 
         // Пакет валиден. Теперь проверяем, влезет ли он в ТЕКСТОВОМ виде
-        char temp_str[512] = ""; // Временная строка для одного пакета
+        char temp_str[2048] = ""; // Временная строка для одного пакета
         uint32_t timestamp;
         memcpy(&timestamp, &packet[2], 4);
         
@@ -269,13 +271,14 @@ void get_narodmon_string(char *data, size_t max_len)
     }
 
 	// Выгрузка истории (если она есть)
-    char one_packet_buf[512];
+    char *one_packet_buf = malloc(2048);//[2048];
 
     // Добавляем из истории, пока get_one_flash_packet_string говорит "True"
     // Мы передаем (max_len - текущая длина - запас под "##")
     while (get_one_flash_packet_string(one_packet_buf, max_len - strlen(data) - 3)) {
         strcat(data, one_packet_buf);
     }
+	free(one_packet_buf);
 
     strcat(data, "##");
 }
@@ -290,7 +293,18 @@ void save_head_to_eeprom(uint32_t head)
 
 void save_tail_to_eeprom(uint32_t tail) 
 {
-    mcp_eeprom_write_bytes(EEPROM_ADDR_TAIL, (uint8_t*)&tail, 4);
+    // 1. Проверяем: изменился ли хвост по сравнению с тем, что уже в EEPROM?
+    if (tail == prev_tail_addr) {
+        // Данные не изменились (выгрузки логов не было), ничего не пишем
+        return; 
+    }
+
+    // 2. Если изменился — пишем в "железо"
+    esp_err_t err = mcp_eeprom_write_bytes(0x04, (uint8_t*)&tail, 4);
+    if (err == ESP_OK) {
+        prev_tail_addr = tail; // Запоминаем новое стабильное состояние
+        ESP_LOGI("EEPROM", "Tail updated in EEPROM to: %u", tail);
+    }
 }
 
 uint32_t read_head_from_eeprom() 

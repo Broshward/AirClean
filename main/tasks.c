@@ -154,10 +154,7 @@ void after_success()
 
     // 1. Фиксируем сдвиг хвоста
     // get_narodmon_string уже сдвинула current_tail_addr в ОЗУ в процессе сборки
-	if (prev_tail_addr != current_tail_addr){
-		save_tail_to_eeprom(current_tail_addr);
-		prev_tail_addr = current_tail_addr;
-	}
+	save_tail_to_eeprom(current_tail_addr);
 
     // 2. Обновляем время последней УДАЧНОЙ синхронизации в SRAM часов
     // Это нам пригодится, чтобы понимать, как долго мы без связи
@@ -181,10 +178,9 @@ void after_failure()
 	gpio_set_level(BLINK_GPIO, 1); // LED is off
 }
 
-
-#define HOST_IP_ADDR  "192.168.43.105" //"narodmon.com"
+#define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105" //"narodmon.ru"
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 1000*60*1+2 // Perod between sends
+#define TIME_PERIOD 1000*(60*5+1) // Perod between sends
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 
 void tcp_clientTask(void *pvParameters)
@@ -196,7 +192,6 @@ void tcp_clientTask(void *pvParameters)
 	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
 
     char rx_buffer[128];
-   // char host_ip[] = HOST_IP_ADDR; //gl_narodmon_addr;
     int addr_family = 0;
     int ip_protocol = 0;
 
@@ -214,11 +209,6 @@ void tcp_clientTask(void *pvParameters)
 			if (time_to_wait>0)
 				vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
 		}
-//		do { 
-//			do_ping_cmd(HOST_IP_ADDR);
-//#define PING_PERIOD 1000*2
-//			vTaskDelay(pdMS_TO_TICKS(PING_PERIOD));
-//		} while(!gl_ping); //Ждём пинга от сервера
 
 		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
 		if (hp == NULL) {
@@ -287,7 +277,7 @@ void tcp_clientTask(void *pvParameters)
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
                 //ESP_LOGI(TCP_TAG, "Received %d bytes from %s:", len, host_ip);
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
-				if (strcmp(rx_buffer,"OK")) 
+				if (strncmp(rx_buffer,"OK",2)) 
 					after_failure();
 				else{
 					after_success();
@@ -346,13 +336,11 @@ void timeTask(void *pvParameters)
 	}
 }
 
-void spi_test(void *pvParameters)
+void test(void *pvParameters)
 {
-	//init_external_flash_spi();
-	read_flash_id();
 	int i=0;
 	while(1){
-		vTaskDelay(pdMS_TO_TICKS(500));
+		vTaskDelay(pdMS_TO_TICKS(1000));
 		i+=4;
 	}
 }
@@ -375,7 +363,6 @@ void blufi_monitor_task(void *pvParameters)
                 
                 //esp_ble_gap_disconnect(remote_bda_global); 
 				esp_restart(); // Самый надежный способ очистить зависший DMA/контроллер
-
                 
                 // Сбрасываем метку после дисконнекта 
 				if (g_blufi_conn_id == 0xffff) 
@@ -404,7 +391,7 @@ void blufi_sender_task(void *pvParameters)
                 continue; 
             }
 //            ESP_LOGI("BLUFI_TX", "Attempting send...");
-            esp_err_t ret = esp_blufi_send_custom_data(msg.payload, msg.length);
+            esp_blufi_send_custom_data(msg.payload, msg.length);
             
             // Если мы здесь — функция разблокировалась
             last_send_attempt_time = 0; 

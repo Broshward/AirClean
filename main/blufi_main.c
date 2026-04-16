@@ -759,7 +759,7 @@ void app_main(void)
 	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task); //Task for WiFi reconnect
 
 	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for times 
-	xTaskCreate( spi_test, "SPI test", 10000, NULL, 1, NULL); //Task for test SPI
+	xTaskCreate( test, "Test", 10000, NULL, 1, NULL); //Task for test SPI
 	xTaskCreate( blufi_sender_task, "Custom Data sender", 4096, NULL, 1, NULL); //Task for test SPI
 
 }
