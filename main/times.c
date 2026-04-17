@@ -8,7 +8,7 @@
 #include "times.h"
 #include "blufi.h"
 #include "i2c.h"
-#include "tasks.h"
+#include "gatts.h"
 
 time_t last_sync_sntp=0;
 
@@ -41,8 +41,7 @@ void time_sync_notification_cb(struct timeval *tv)
     
 	time(&last_sync_sntp);
 	save_last_sync_sntp(last_sync_sntp); //Сохраняем время синхронизации
-	if (is_ble_ready)
-		send_last_sync_sntp();
+	send_last_sync_sntp();
     // Как только время стало актуальным — сразу записываем его в наши часы RTC
     system_time_to_rtc(); 
 }
@@ -73,9 +72,9 @@ void send_last_sync_sntp()
 	strftime(time_str, sizeof(time_str), "%H_%M_%S %d-%m-%Y", &timeinfo);
 	char payload[35];
 	snprintf(payload, sizeof(payload), "Time_sync_sntp:%s", time_str);
-	queue_blufi_data((uint8_t *)payload, strlen(payload));
+	send_ble_data(payload);
 	snprintf(payload, sizeof(payload), "TZ:%d", (int)load_tz_from_nvs());
-	queue_blufi_data((uint8_t *)payload, strlen(payload));
+	send_ble_data(payload);
 }
 
 // Вспомогательные функции BCD

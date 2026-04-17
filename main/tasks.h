@@ -8,7 +8,6 @@ void sensorsTask(void *pvParameters);
 void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_client_v4.c file
 void timeTask(void *pvParameters);
 void test(void *pvParameters);
-void blufi_sender_task(void *pvParameters);
 
 esp_err_t queue_blufi_data(uint8_t *data, size_t len); //Instead esp_blufi_send_custom_data()
 
@@ -19,12 +18,4 @@ extern float gl_luminosity;
 extern float gl_temp;
 extern float gl_chip_temp;
 extern uint8_t gl_temperature[2];
-extern esp_bd_addr_t remote_bda_global;
-extern QueueHandle_t blufi_tx_queue;
-
-typedef struct {
-    uint8_t *payload; // Динамический буфер для данных
-    size_t length;    // Длина данных
-} blufi_msg_t;
-
 

@@ -52,7 +52,7 @@ void sensor_set_value(int id, value_type_t v_type, const char* name, const char*
 
 void send_sensors_values(void) 
 {
-    if (!is_ble_ready || sensor_count == 0) return;
+    if (sensor_count == 0) return;
 
     char buf[MAX_BLUFI_PACKET];
     char temp[32]; // Временный буфер для одной записи (ID:VAL;)

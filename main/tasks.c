@@ -34,9 +34,6 @@ uint8_t gl_temperature[2];
 static const char *TCP_TAG = "TCP_IP";
 RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
-QueueHandle_t blufi_tx_queue = NULL;
-static uint32_t last_send_attempt_time = 0;
-
 #define BLINK_GPIO 8
 void configure_led(void)
 {
@@ -117,12 +114,9 @@ void sensorsTask(void *pvParameters)
 			// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
 			if (count >= TRANSMIT_PERIOD/ADC_PERIOD){
 				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-				//char payload[40];
-				//snprintf(payload, sizeof(payload), "Amb_Temp:%.2f", temperature_calc(gl_temperature));
 				sensor_data_t val;
 				val.f = temperature_calc(gl_temperature);
 				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "MCP9800", val);
-				//queue_blufi_data((uint8_t *)payload, strlen(payload));
 			
 				// Enable temperature sensor
 				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
@@ -138,8 +132,7 @@ void sensorsTask(void *pvParameters)
 				sensor_set_value(4, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
 				count=0;
 
-				if (is_ble_ready)
-					send_sensors_values();
+				send_sensors_values();
 			}
 			count++;
         }
@@ -314,23 +307,18 @@ void timeTask(void *pvParameters)
 				xTaskNotifyGive(tcptask);
 				tcp_notify_given=true;
 			}
-			if (is_ble_ready){
-				//Time
-				strftime(timestr, sizeof(timestr), "%H:%M:%S", &timeinfo);
-				snprintf(payload, sizeof(payload), "Time:%s", timestr);
-				//queue_blufi_data((uint8_t *)payload, strlen(payload));
-				send_ble_data(payload);
-				//Date
-				strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
-				snprintf(payload, sizeof(payload), "Date:%s", timestr);
-				send_ble_data(payload);
-			}
+			//Time
+			strftime(timestr, sizeof(timestr), "%H:%M:%S", &timeinfo);
+			snprintf(payload, sizeof(payload), "Time:%s", timestr);
+			send_ble_data(payload);
+			//Date
+			strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
+			snprintf(payload, sizeof(payload), "Date:%s", timestr);
+			send_ble_data(payload);
 		}
 		else {
-			if (is_ble_ready){
-				snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
-				send_ble_data(payload);
-			}
+			snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
+			send_ble_data(payload);
 			ESP_LOGI("Time", "Resync time");
 			resync_time();
 		}
@@ -346,89 +334,5 @@ void test(void *pvParameters)
 		vTaskDelay(pdMS_TO_TICKS(1000));
 		i+=4;
 	}
-}
-
-uint16_t g_blufi_conn_id = 0xffff; 
-esp_bd_addr_t remote_bda_global;
-
-//Эта задача нужна для того, чтобы разблокировать blufi_sender_task когда она зависнет.
-void blufi_monitor_task(void *pvParameters) 
-{
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Проверка раз в 5 секунд
-		//ESP_LOGI("MONITOR","I am Monitor!!!");
-
-        if (last_send_attempt_time != 0) {
-            uint32_t duration = (xTaskGetTickCount() - last_send_attempt_time) * portTICK_PERIOD_MS;
-            
-            if (duration > 10000) { // Если функция висит дольше 10 сек
-                ESP_LOGE("MONITOR", "BLUFI SEND HANG DETECTED! Force Disconnect...");
-                
-                //esp_ble_gap_disconnect(remote_bda_global); 
-				esp_restart(); // Самый надежный способ очистить зависший DMA/контроллер
-                
-                // Сбрасываем метку после дисконнекта 
-				if (g_blufi_conn_id == 0xffff) 
-					last_send_attempt_time = 0; 
-            }
-        }
-    }
-}
-
-void blufi_sender_task(void *pvParameters) 
-{
-	//Создаём очередь сообщений
-	blufi_tx_queue = xQueueCreate(20, sizeof(blufi_msg_t));
-	// Создаём задачу монитор, которая нужна, чтобы разорвать связь, если эта задача зависла.
-	xTaskCreate( blufi_monitor_task, "Custom Data sender monitor", 4096, NULL, 10, NULL); //Task for test SPI
-
-	blufi_msg_t msg;
-    while (1) {
-        if (xQueueReceive(blufi_tx_queue, &msg, portMAX_DELAY)) {
-            // Обновляем метку времени ПЕРЕД вызовом
-            last_send_attempt_time = xTaskGetTickCount(); 
-            
-			//Если нет подключения не пытаемся ничего слать, просто выкидываем сообщение
-			if (g_blufi_conn_id == 0xffff) {
-                free(msg.payload);
-                continue; 
-            }
-//            ESP_LOGI("BLUFI_TX", "Attempting send...");
-            esp_blufi_send_custom_data(msg.payload, msg.length);
-            
-            // Если мы здесь — функция разблокировалась
-            last_send_attempt_time = 0; 
-            
-            free(msg.payload);
-        }
-    }
-}
-
-esp_err_t queue_blufi_data(uint8_t *data, size_t len) 
-{
-    if (blufi_tx_queue == NULL) return ESP_FAIL;
-	
-	// Если нет соединения
-    if (g_blufi_conn_id == 0xffff) {
-        // ESP_LOGD("BLUFI_TX", "No connection, skipping data"); // Опционально для отладки
-        return ESP_ERR_INVALID_STATE; 
-    }
-
-    blufi_msg_t msg;
-    msg.length = len;
-    msg.payload = malloc(len); // Выделяем память под копию данных
-    
-    if (msg.payload == NULL) return ESP_ERR_NO_MEM;
-    
-    memcpy(msg.payload, data, len);
-
-    // Отправляем в очередь (не ждем долго, если очередь полна — значит данных слишком много)
-    if (xQueueSend(blufi_tx_queue, &msg, pdMS_TO_TICKS(50)) != pdPASS) {
-        free(msg.payload);
-        ESP_LOGE("BLUFI_TX", "Queue full, dropping packet!");
-        return ESP_FAIL;
-    }
-    
-    return ESP_OK;
 }
 

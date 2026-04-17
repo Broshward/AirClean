@@ -88,14 +88,7 @@ TaskHandle_t tcptask;
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
 
-bool is_ble_ready = false;
 TimerHandle_t ble_stable_timer;
-
-// Функция, которая вызовется, когда таймер "пропищит"
-void vBleStableTimerCallback(TimerHandle_t xTimer) {
-    is_ble_ready = true;
-    ESP_LOGI("SENSOR", "BLE is now stable and ready for data");
-}
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
@@ -200,7 +193,7 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
 	             IP2STR(&event->ip_info.netmask),
 	             IP2STR(&event->ip_info.gw));
 	
-	    queue_blufi_data((uint8_t *)net_info, strlen(net_info));
+	    send_ble_data(net_info);
 
         esp_blufi_extra_info_t info;
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
@@ -387,11 +380,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         ble_is_connected = true;
         esp_blufi_adv_stop();
         blufi_security_init();
-		// Disable transmit sensors and time flag
-		g_blufi_conn_id = param->connect.conn_id;
-		memcpy(remote_bda_global, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-		ESP_LOGI("BLUFI", "Connected, ID: %d", g_blufi_conn_id);
-
 
 		// НАСТРОЙКА ИНТЕРВАЛА
 		esp_ble_conn_update_params_t conn_params = {0};
@@ -403,27 +391,12 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		esp_ble_gap_update_conn_params(&conn_params);
 		ESP_LOGI("BLUFI", "Connection params requested: 40-80ms");
 
-    
-		// Очищаем очередь 
-		if (blufi_tx_queue != NULL) {
-			xQueueReset(blufi_tx_queue);
-		}
-    
-		is_ble_ready = false;
-		if (ble_stable_timer) {
-			xTimerStart(ble_stable_timer, 0); // Запускаем таймер без блокировки
-		}
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         BLUFI_INFO("BLUFI ble disconnect\n");
         ble_is_connected = false;
         blufi_security_deinit();
         esp_blufi_adv_start();
-		is_ble_ready = false;
-		//if (ble_stable_timer) {
-		//	xTimerStop(ble_stable_timer, 0);
-		//}	
-		g_blufi_conn_id = 0xffff;
         break;
     case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
         BLUFI_INFO("BLUFI Set WIFI opmode %d\n", param->wifi_mode.op_mode);
@@ -593,7 +566,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 						 IP2STR(&ip_info.gw),
 						 is_static_mode);
 				
-				queue_blufi_data((uint8_t *)response, strlen(response));
+				send_ble_data(response);
 			}
 		}
 		if (strncmp(cmd, "SET_STATIC:", 11) == 0) {
@@ -621,7 +594,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 				// Отправим подтверждение обратно в приложение
 	            char resp[100];
 				snprintf(resp, sizeof(resp), "CONFIRM_STATIC:%s", ip_str);
-				queue_blufi_data((uint8_t *)resp, strlen(resp));
+				send_ble_data(resp);
 
 				// Запись новых значений во флэш
 				save_static_ip_to_nvs(ip_str, mask_str, gw_str);
@@ -741,12 +714,6 @@ void app_main(void)
 	
 	ble_send_mutex = xSemaphoreCreateMutex();    
 
-	ble_stable_timer = xTimerCreate("BleStableTimer",	// is_ble_ready timer 
-                                    pdMS_TO_TICKS(2000), // Задержка 3 сек
-                                    pdFALSE,             // Однократный (не авто-рестарт)
-                                    (void *)0, 
-                                    vBleStableTimerCallback);	
-
     i2c_init();
 
     // Установка часового пояса (например, Москва UTC+3)
@@ -763,6 +730,5 @@ void app_main(void)
 
 	xTaskCreate( timeTask, "Time", 4096, NULL, 1, NULL); //Task for times 
 //	xTaskCreate( test, "Test", 4096, NULL, 1, NULL); //Task for test SPI
-	xTaskCreate( blufi_sender_task, "Custom Data sender", 4096, NULL, 1, NULL); //Task for test SPI
 
 }
