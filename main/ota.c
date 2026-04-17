@@ -4,7 +4,7 @@
 #include "esp_app_format.h"
 #include "esp_ota_ops.h"
 
-#define UPDATE_SERVER "192.168.1.75"
+#define UPDATE_SERVER "192.168.43.105"
 
 // Эти переменные создаются автоматически благодаря target_add_binary_data
 extern const uint8_t server_cert_pem_start[] asm("_binary_server_cert_pem_start");

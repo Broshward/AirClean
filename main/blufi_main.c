@@ -26,6 +26,7 @@
 #include "esp_blufi_api.h"
 #include "blufi.h"
 #include "sensor.h"
+#include "gatts.h"
 
 #include "esp_blufi.h"
 #include "lwip/ip_addr.h"
@@ -376,7 +377,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
     switch (event) {
     case ESP_BLUFI_EVENT_INIT_FINISH:
         BLUFI_INFO("BLUFI init finish\n");
-
         esp_blufi_adv_start();
         break;
     case ESP_BLUFI_EVENT_DEINIT_FINISH:
@@ -402,6 +402,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
 		conn_params.timeout = 600;  // Таймаут связи 6 секунд (600 * 10мс)
 		esp_ble_gap_update_conn_params(&conn_params);
 		ESP_LOGI("BLUFI", "Connection params requested: 40-80ms");
+
     
 		// Очищаем очередь 
 		if (blufi_tx_queue != NULL) {
@@ -721,13 +722,11 @@ void app_main(void)
 
     initialise_wifi();
 
-#if CONFIG_BT_CONTROLLER_ENABLED || !CONFIG_BT_NIMBLE_ENABLED
     ret = esp_blufi_controller_init();
     if (ret) {
         BLUFI_ERROR("%s BLUFI controller init failed: %s\n", __func__, esp_err_to_name(ret));
         return;
     }
-#endif
 
     ret = esp_blufi_host_and_cb_init(&example_callbacks);
     if (ret) {
@@ -737,13 +736,17 @@ void app_main(void)
 
     BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
 	
-    ble_stable_timer = xTimerCreate("BleStableTimer",	// is_ble_ready timer 
+	esp_ble_gatts_register_callback(sensor_gatts_cb);
+	esp_ble_gatts_app_register(1);
+	
+	ble_send_mutex = xSemaphoreCreateMutex();    
+
+	ble_stable_timer = xTimerCreate("BleStableTimer",	// is_ble_ready timer 
                                     pdMS_TO_TICKS(2000), // Задержка 3 сек
                                     pdFALSE,             // Однократный (не авто-рестарт)
                                     (void *)0, 
                                     vBleStableTimerCallback);	
 
-	// i2c init
     i2c_init();
 
     // Установка часового пояса (например, Москва UTC+3)
@@ -753,13 +756,13 @@ void app_main(void)
 	rtc_to_system_time();
 	sntp_init_and_sync();
 
-	xTaskCreate( sensorsTask, "Light", 10000, NULL, 1, NULL);
+	xTaskCreate( sensorsTask, "Light", 4096, NULL, 1, NULL);
 
 	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
-	xTaskCreate( reconnectTask, "reconnect Wifi", 10000,NULL, 1, &reconnect_task); //Task for WiFi reconnect
+	xTaskCreate( reconnectTask, "reconnect Wifi", 4096,NULL, 1, &reconnect_task); //Task for WiFi reconnect
 
-	xTaskCreate( timeTask, "Time", 10000, NULL, 1, NULL); //Task for times 
-	xTaskCreate( test, "Test", 10000, NULL, 1, NULL); //Task for test SPI
+	xTaskCreate( timeTask, "Time", 4096, NULL, 1, NULL); //Task for times 
+//	xTaskCreate( test, "Test", 4096, NULL, 1, NULL); //Task for test SPI
 	xTaskCreate( blufi_sender_task, "Custom Data sender", 4096, NULL, 1, NULL); //Task for test SPI
 
 }

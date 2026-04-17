@@ -11,6 +11,7 @@ idf_component_register(SRCS "blufi_main.c"
 							"ota.c"
 							"remote_log.c"
 							"sensor.c"
+							"gatts.c"
                     PRIV_REQUIRES bt nvs_flash mbedtls esp_driver_gpio lwip esp_adc esp_driver_i2c esp_driver_tsens esp_driver_spi esp_https_ota mbedtls app_update
 
                     INCLUDE_DIRS ".")

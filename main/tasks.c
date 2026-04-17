@@ -19,6 +19,7 @@
 #include "spi.h"
 #include "ota.h"
 #include "sensor.h"
+#include "gatts.h"
 
 
 
@@ -209,10 +210,13 @@ void tcp_clientTask(void *pvParameters)
 			if (time_to_wait>0)
 				vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
 		}
+					time(&gl_last_send_time);  //Set last attempt send to server time
+					save_last_send_time(gl_last_send_time); // Write last send time to flash
 
 		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
 		if (hp == NULL) {
 			ESP_LOGE(TCP_TAG, "DNS lookup failed");
+			after_failure();
 			continue;
 		}
 		char *host_ip = inet_ntoa(*(struct in_addr *)hp->h_addr_list[0]);
@@ -224,8 +228,6 @@ void tcp_clientTask(void *pvParameters)
         addr_family = AF_INET;
         ip_protocol = IPPROTO_IP;
 
-					time(&gl_last_send_time);  //Set last attempt send to server time
-					save_last_send_time(gl_last_send_time); // Write last send time to flash
         if (sock != -1) {
             ESP_LOGE(TCP_TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
@@ -316,17 +318,18 @@ void timeTask(void *pvParameters)
 				//Time
 				strftime(timestr, sizeof(timestr), "%H:%M:%S", &timeinfo);
 				snprintf(payload, sizeof(payload), "Time:%s", timestr);
-				queue_blufi_data((uint8_t *)payload, strlen(payload));
+				//queue_blufi_data((uint8_t *)payload, strlen(payload));
+				send_ble_data(payload);
 				//Date
 				strftime(timestr, sizeof(timestr), "%d - %m - %Y", &timeinfo);
 				snprintf(payload, sizeof(payload), "Date:%s", timestr);
-				queue_blufi_data((uint8_t *)payload, strlen(payload));
+				send_ble_data(payload);
 			}
 		}
 		else {
 			if (is_ble_ready){
 				snprintf(payload, sizeof(payload), "Time_sync_sntp:Not sync");
-				queue_blufi_data((uint8_t *)payload, strlen(payload));
+				send_ble_data(payload);
 			}
 			ESP_LOGI("Time", "Resync time");
 			resync_time();

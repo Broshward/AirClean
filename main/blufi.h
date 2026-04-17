@@ -28,3 +28,4 @@ esp_err_t esp_blufi_controller_init(void);
 esp_err_t esp_blufi_controller_deinit(void);
 
 extern bool is_ble_ready;
+extern uint16_t g_blufi_conn_id; 

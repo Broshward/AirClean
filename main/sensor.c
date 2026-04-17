@@ -11,6 +11,7 @@
 #include "blufi.h"
 #include "spi.h"
 #include "i2c.h"
+#include "gatts.h"
 
 const char *SENSOR_TAG = "Sensors";
 
@@ -71,7 +72,7 @@ void send_sensors_values(void)
         // ПРОВЕРКА: Поместится ли temp в текущий buf?
         if (strlen(buf) + strlen(temp) >= MAX_BLUFI_PACKET - 1) {
             // Если не влезает — отправляем то, что уже накопили
-            queue_blufi_data((uint8_t*)buf, strlen(buf));
+            send_ble_data(buf);
             
             // Начинаем новый пакет с тем же префиксом
             snprintf(buf, sizeof(buf), "Values:");
@@ -82,7 +83,7 @@ void send_sensors_values(void)
 
     // Отправляем остаток (последний пакет)
     if (strlen(buf) > 7) { // 7 — это длина "Values|"
-        queue_blufi_data((uint8_t*)buf, strlen(buf));
+        send_ble_data(buf);
     }
 }
 
@@ -98,7 +99,7 @@ void send_sensors()
 		sprintf(temp_pce, "%d:%d:%s:%s;", all_sensors[i].id, all_sensors[i].val_type,all_sensors[i].type_name,all_sensors[i].label);
 		strcat(out_buffer,temp_pce);
 	}
-	queue_blufi_data((uint8_t *)out_buffer, strlen(out_buffer));
+	send_ble_data(out_buffer);
 }
 
 void flash_log_all_sensors(uint32_t timestamp) 
