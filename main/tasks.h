@@ -9,8 +9,6 @@ void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_
 void timeTask(void *pvParameters);
 void test(void *pvParameters);
 
-esp_err_t queue_blufi_data(uint8_t *data, size_t len); //Instead esp_blufi_send_custom_data()
-
 #include "freertos/FreeRTOS.h"
 extern TaskHandle_t tcptask;
 

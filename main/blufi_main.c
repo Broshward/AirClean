@@ -1,6 +1,5 @@
 #include "tasks.h"
 #include "times.h"
-#include "ota.h"
 #include "i2c.h"
 
 #include <stdio.h>
@@ -84,11 +83,33 @@ static esp_blufi_extra_info_t gl_sta_conn_info;
 const static char *BLUFI_TAG = "BLUFI";
 
 TaskHandle_t tcptask;
-
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
+SemaphoreHandle_t ble_send_mutex;
 
-TimerHandle_t ble_stable_timer;
+void get_net()
+{
+	esp_netif_ip_info_t ip_info;
+	esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+	
+	// Проверяем статус DHCP клиента
+	esp_netif_dhcp_status_t status;
+	esp_netif_dhcpc_get_status(netif, &status);
+	// Если статус ESP_NETIF_DHCP_STOPPED (3), значит у нас Static
+	int is_static_mode = (status == ESP_NETIF_DHCP_STOPPED) ? 1 : 0;
+
+	if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+		char response[100];
+		// Добавляем режим в конец строки: IP|MASK|GW|MODE
+		snprintf(response, sizeof(response), "NET:" IPSTR "|" IPSTR "|" IPSTR "|%d",
+		 IP2STR(&ip_info.ip),
+		 IP2STR(&ip_info.netmask),
+		 IP2STR(&ip_info.gw),
+		 is_static_mode);
+		
+		send_ble_data(response);
+	}
+}
 
 void save_static_ip_to_nvs(const char* ip, const char* mask, const char* gw) 
 {
@@ -127,6 +148,58 @@ void load_and_apply_nvs_ip()
         nvs_close(my_handle);
     }
 }
+
+void set_static(char *cmd)
+{
+	char *data = cmd + 11; // Пропускаем префикс (SET_STATIC:)
+	char ip_str[16], mask_str[16], gw_str[16];
+
+	// Парсим строку формата "IP|MASK|GW"
+	if (sscanf(data, "%[^|]|%[^|]|%s", ip_str, mask_str, gw_str) == 3) {
+		esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+		
+		// 1. Останавливаем DHCP клиент (обязательно!)
+		esp_netif_dhcpc_stop(netif);
+
+		// 2. Заполняем структуру новыми данными
+		esp_netif_ip_info_t ip_info;
+		ip_info.ip.addr = ipaddr_addr(ip_str);
+		ip_info.netmask.addr = ipaddr_addr(mask_str);
+		ip_info.gw.addr = ipaddr_addr(gw_str);
+
+		// 3. Применяем настройки
+		esp_netif_set_ip_info(netif, &ip_info);
+		
+		ESP_LOGI("BLUFI", "Применен Static IP: %s", ip_str);
+		
+		// Отправим подтверждение обратно в приложение
+		char resp[100];
+		snprintf(resp, sizeof(resp), "CONFIRM_STATIC:%s", ip_str);
+		send_ble_data(resp);
+
+		// Запись новых значений во флэш
+		save_static_ip_to_nvs(ip_str, mask_str, gw_str);
+	}
+}
+
+void set_dhcp()
+{
+	nvs_handle_t my_handle;
+	if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
+		// Удаляем ключи из памяти
+		nvs_erase_key(my_handle, "static_ip");
+		nvs_erase_key(my_handle, "static_mask");
+		nvs_erase_key(my_handle, "static_gw");
+		nvs_commit(my_handle);
+		nvs_close(my_handle);
+	}
+	
+	esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+	esp_netif_dhcpc_start(netif); // Снова включаем автополучение
+	ESP_LOGI("NVS", "Режим DHCP восстановлен");
+}
+
+
 
 static void example_record_wifi_conn_info(int rssi, uint8_t reason)
 {
@@ -540,110 +613,6 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         BLUFI_INFO("Recv Custom Data %" PRIu32 "\n", param->custom_data.data_len);
         ESP_LOG_BUFFER_HEX("Custom Data", param->custom_data.data, param->custom_data.data_len);
 
-	    // 1. Превращаем пришедшие данные в строку
-	    char *cmd = (char *)malloc(param->custom_data.data_len + 1);
-	    memcpy(cmd, param->custom_data.data, param->custom_data.data_len);
-	    cmd[param->custom_data.data_len] = '\0';
-		ESP_LOGI (BLUFI_TAG, "Custom Data: %s\n", cmd);
-	
-	    // 2. Проверяем команду
-	    if (strcmp(cmd, "GET_NET") == 0) {
-	        esp_netif_ip_info_t ip_info;
-	        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-	        
-			// Проверяем статус DHCP клиента
-			esp_netif_dhcp_status_t status;
-			esp_netif_dhcpc_get_status(netif, &status);
-			// Если статус ESP_NETIF_DHCP_STOPPED (3), значит у нас Static
-			int is_static_mode = (status == ESP_NETIF_DHCP_STOPPED) ? 1 : 0;
-
-			if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-				char response[100];
-				// Добавляем режим в конец строки: IP|MASK|GW|MODE
-				snprintf(response, sizeof(response), "NET:" IPSTR "|" IPSTR "|" IPSTR "|%d",
-						 IP2STR(&ip_info.ip),
-						 IP2STR(&ip_info.netmask),
-						 IP2STR(&ip_info.gw),
-						 is_static_mode);
-				
-				send_ble_data(response);
-			}
-		}
-		if (strncmp(cmd, "SET_STATIC:", 11) == 0) {
-			char *data = cmd + 11; // Пропускаем префикс
-			char ip_str[16], mask_str[16], gw_str[16];
-		
-			// Парсим строку формата "IP|MASK|GW"
-			if (sscanf(data, "%[^|]|%[^|]|%s", ip_str, mask_str, gw_str) == 3) {
-				esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-				
-				// 1. Останавливаем DHCP клиент (обязательно!)
-				esp_netif_dhcpc_stop(netif);
-		
-				// 2. Заполняем структуру новыми данными
-				esp_netif_ip_info_t ip_info;
-				ip_info.ip.addr = ipaddr_addr(ip_str);
-				ip_info.netmask.addr = ipaddr_addr(mask_str);
-				ip_info.gw.addr = ipaddr_addr(gw_str);
-		
-				// 3. Применяем настройки
-				esp_netif_set_ip_info(netif, &ip_info);
-				
-				ESP_LOGI("BLUFI", "Применен Static IP: %s", ip_str);
-				
-				// Отправим подтверждение обратно в приложение
-	            char resp[100];
-				snprintf(resp, sizeof(resp), "CONFIRM_STATIC:%s", ip_str);
-				send_ble_data(resp);
-
-				// Запись новых значений во флэш
-				save_static_ip_to_nvs(ip_str, mask_str, gw_str);
-			}
-		}
-		if (strcmp(cmd, "SET_DHCP") == 0) {
-		    nvs_handle_t my_handle;
-		    if (nvs_open("storage", NVS_READWRITE, &my_handle) == ESP_OK) {
-		        // Удаляем ключи из памяти
-		        nvs_erase_key(my_handle, "static_ip");
-		        nvs_erase_key(my_handle, "static_mask");
-		        nvs_erase_key(my_handle, "static_gw");
-		        nvs_commit(my_handle);
-		        nvs_close(my_handle);
-		    }
-		    
-		    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-		    esp_netif_dhcpc_start(netif); // Снова включаем автополучение
-		    ESP_LOGI("NVS", "Режим DHCP восстановлен");
-		}
-	    if (strcmp(cmd, "GET_SYNC_TIME") == 0) {
-			send_last_sync_sntp();
-		}
-
-	    if (strcmp(cmd, "GET_SENSORS") == 0) {
-			send_sensors();
-		}
-
-		if (strncmp(cmd, "SET_TZ:", 7) == 0) {
-			int offset = atoi(cmd + 7);
-			save_tz_to_nvs(offset);
-			set_timezone(offset);
-			// После смены пояса нужно обновить время в RTC, 
-			// так как системное время изменилось!
-			system_time_to_rtc();
-		}
-
-	    if (strcmp(cmd, "START_OTA") == 0) {
-	        ESP_LOGI("OTA", " Запуск обновления...");
-	        // Вызываем функцию обновления
-	        run_ota_update_secure(); 
-	        //run_ota_update(); 
-	    }
-
-		if (strcmp(cmd, "RESET") == 0) { // Program reset
-			esp_restart();
-		}
-
-	    free(cmd);
 	    break;
 	}
 

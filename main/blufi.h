@@ -26,3 +26,8 @@ esp_err_t esp_blufi_host_and_cb_init(esp_blufi_callbacks_t *callbacks);
 esp_err_t esp_blufi_host_deinit(void);
 esp_err_t esp_blufi_controller_init(void);
 esp_err_t esp_blufi_controller_deinit(void);
+
+// Command functions
+void get_net();
+void set_static(char *cmd);
+void set_dhcp();

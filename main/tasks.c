@@ -174,7 +174,7 @@ void after_failure()
 
 #define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105" //"narodmon.ru"
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 1000*(60*5+1) // Perod between sends
+#define TIME_PERIOD 60*5+1  // Perod between sends(seconds) 
 #define TIME_PERIOD_CONN 1000*1 // Period between reconnects
 
 void tcp_clientTask(void *pvParameters)
@@ -195,16 +195,17 @@ void tcp_clientTask(void *pvParameters)
 		time(&now);
 		printf("Time NOW: %d\n", (int)now);
 		printf("Time of last send: %d\n", (int)gl_last_send_time);
+		int time_to_wait=0;
 		if (now-gl_last_send_time<0 || gl_last_send_time==0) //Последняя передача в будущем или мы считали 0
-			vTaskDelay(TIME_PERIOD);
-		else if (now-gl_last_send_time < TIME_PERIOD/1000) {
-			int time_to_wait = (TIME_PERIOD-1000*(now-gl_last_send_time)); // ms
-			printf("Time to wait : %d second\n", time_to_wait/1000);
-			if (time_to_wait>0)
-				vTaskDelay(pdMS_TO_TICKS(TIME_PERIOD-1000*(now-gl_last_send_time))); //
-		}
-					time(&gl_last_send_time);  //Set last attempt send to server time
-					save_last_send_time(gl_last_send_time); // Write last send time to flash
+			time_to_wait = TIME_PERIOD;
+		else if (now-gl_last_send_time < TIME_PERIOD/1000)  //Валидные данные(наверное))
+			time_to_wait = TIME_PERIOD - (now - gl_last_send_time); // ms
+		if (time_to_wait<0)
+			time_to_wait = TIME_PERIOD;
+		printf("Time to wait : %d second\n", time_to_wait);
+		vTaskDelay(pdMS_TO_TICKS(time_to_wait*1000)); //
+		time(&gl_last_send_time);  //Set last attempt send to server time
+		save_last_send_time(gl_last_send_time); // Write last send time to flash
 
 		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
 		if (hp == NULL) {
