@@ -150,7 +150,7 @@ void flash_log_all_sensors(uint32_t timestamp)
      flash_write_data(buf, ptr);
     
     // Обновляем head в eeprom-памяти часов
-	save_head_to_eeprom(current_head_addr+ptr);
+	save_head_to_eeprom(current_head_addr);
 }
 
 const char* get_label_by_id(int id) 

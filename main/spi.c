@@ -168,14 +168,11 @@ void flash_write_data(uint8_t *data, uint16_t len)
         uint16_t to_write = (len - sent < space_in_page) ? (len - sent) : space_in_page;
 
         // 4. Физическая запись
-        flash_wait_until_ready();
-        flash_write_enable();
-
         // Отправляем пакет
         flash_write_raw(current_head_addr, &data[sent], to_write);
 
         // Сдвигаем глобальный адрес и счетчик отправленного
-        current_head_addr += to_write;
+        current_head_addr += to_write % FLASH_TOTAL_SIZE;
         sent += to_write;
     }
 }
