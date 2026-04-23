@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 #include "driver/temperature_sensor.h"
 #include "driver/gpio.h"
-#include "esp_gap_ble_api.h"
+#include "esp_timer.h"
 
 #include "tasks.h"
 #include "blufi.h"
@@ -21,15 +21,6 @@
 #include "sensor.h"
 #include "gatts.h"
 
-
-
-/*ADC Light sensor Task*/
-#define ADC_PERIOD 10			//Период измерения
-#define TRANSMIT_PERIOD 1000*1	//Период передачи показаний
-float gl_luminosity;
-float gl_temp;
-float gl_chip_temp;
-uint8_t gl_temperature[2];
 
 static const char *TCP_TAG = "TCP_IP";
 RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
@@ -68,8 +59,15 @@ float get_kty81_210_temp(int in_volt)
     return temp;
 }
 
+
+#define SEND_PERIOD 1000*1	//Период передачи показаний
+#define ADC_PERIOD 10			//Период измерения
 void sensorsTask(void *pvParameters)
 {
+	float luminosity=0;
+	float temp=0;
+	uint8_t temperature[2];
+
 //	sensors_init();
 	config_MCP9800(); // Датчик температуры
 	
@@ -86,7 +84,7 @@ void sensorsTask(void *pvParameters)
 	static int filtered_value2;
 	adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN0, &filtered_value2); //Начальное значение 
 	const int coeff = 64; // Коэффициент фильтрации
-	int count=0;
+	int send_count=0; // Send sensors to flutter period
     while (1) {
         if (do_calibration1_chan0) {
 
@@ -99,48 +97,90 @@ void sensorsTask(void *pvParameters)
 
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, filtered_value1, &voltage));
 
-			gl_luminosity = pow(10,((float)voltage-253.0)/390); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+			luminosity = pow(10,((float)voltage-253.0)/390); // 10**((V-Vdark)/S) V,Vdark[mV], S [V/decade] 
+        }
         if (do_calibration1_chan1) {
 			int raw_value;
 			int voltage;
 			adc_oneshot_read(adc1_handle, EXAMPLE_ADC1_CHAN1, &raw_value);
 			filtered_value2 = (filtered_value2 * (coeff - 1) + raw_value) / coeff;
             adc_cali_raw_to_voltage(adc1_cali_chan1_handle, filtered_value2, &voltage);
-			gl_temp = get_kty81_210_temp(voltage);
+			temp = get_kty81_210_temp(voltage);
 			//ESP_LOGI("ADC", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, filtered_value2);
             //ESP_LOGI("ADC", "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, EXAMPLE_ADC1_CHAN1, voltage);
         }
 			
-			// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
-			if (count >= TRANSMIT_PERIOD/ADC_PERIOD){
-				i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, gl_temperature, 2);
-				sensor_data_t val;
-				val.f = temperature_calc(gl_temperature);
-				sensor_set_value(1, VAL_TYPE_FLOAT, "t", "MCP9800", val);
-			
-				// Enable temperature sensor
-				ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
-				// Get converted sensor data
-				ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &val.f));
-				sensor_set_value(2, VAL_TYPE_FLOAT, "t", "ESP32C3_temp", val);
-				// Disable the temperature sensor if it is not needed and save the power
-				ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
+		// Цикл отправки данных(медленный) (TRANSMIT_PERIOD) 
+		if (send_count >= SEND_PERIOD/ADC_PERIOD){
+			i2c_register_read(MCP9800_handle, MCP9800_TEMPERATURE_REG, temperature, 2);
+			sensor_data_t val;
+			val.f = temperature_calc(temperature);
+			sensor_set_value(1, VAL_TYPE_FLOAT, "t", "MCP9800", val);
+		
+			// Enable temperature sensor
+			ESP_ERROR_CHECK(temperature_sensor_enable(temp_handle));
+			// Get converted sensor data
+			ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_handle, &val.f));
+			sensor_set_value(2, VAL_TYPE_FLOAT, "t", "ESP32C3_temp", val);
+			// Disable the temperature sensor if it is not needed and save the power
+			ESP_ERROR_CHECK(temperature_sensor_disable(temp_handle));
 
-				val.f = gl_temp;
-				sensor_set_value(3, VAL_TYPE_FLOAT, "t", "KTY81_210", val);
-				val.f = gl_luminosity;
-				sensor_set_value(4, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
-				count=0;
+			val.f = temp;
+			sensor_set_value(3, VAL_TYPE_FLOAT, "t", "KTY81_210", val);
+			val.f = luminosity;
+			sensor_set_value(4, VAL_TYPE_FLOAT, "l", "APDS-9007", val);
+			send_count=0;
 
-				send_sensors_values();
-			}
-			count++;
-        }
+			send_sensors_values();
+		}
+		send_count++;
 
         //vTaskDelay(pdMS_TO_TICKS(1000));
         vTaskDelay(pdMS_TO_TICKS(ADC_PERIOD));
     }
 }
+
+// 1. Таймер логирования (5 минут)
+void timer_logging_cb(void* arg) 
+{
+    time_t now;
+    time(&now);
+    if (now > 1767225600) { // После 2026 года
+        flash_log_all_sensors((uint32_t)now);
+
+		save_last_send_time(now); // Save last write time
+		
+        ESP_LOGI("TIMER", "Periodic log saved to flash");
+    }
+}
+
+// 2. Таймер отправки (1 минута)
+void timer_sending_cb(void* arg) 
+{
+    // Просто даем пинок задаче отправки (или вызываем функцию)
+    // Но лучше уведомлять задачу, чтобы не делать тяжелый сетевой код в колбэке таймера
+    xTaskNotifyGive(tcptask); 
+}
+
+#define WRITE_PERIOD 60*5  // Period between log writes(seconds) 
+#define NARODMON_PERIOD 60 // Period between narodmon sends(second)
+void start_timers() 
+{
+    timer_logging_cb(NULL); // Сразу пишем на флешку
+    timer_sending_cb(NULL); // Сразу пинаем отправку в Народмон
+
+	//Запускаем периодику
+    const esp_timer_create_args_t log_timer_args = { .callback = &timer_logging_cb, .name = "log_timer" };
+    const esp_timer_create_args_t send_timer_args = { .callback = &timer_sending_cb, .name = "send_timer" };
+
+    esp_timer_handle_t log_timer, send_timer;
+    esp_timer_create(&log_timer_args, &log_timer);
+    esp_timer_create(&send_timer_args, &send_timer);
+
+    esp_timer_start_periodic(log_timer, WRITE_PERIOD * 1000000); // 5 минут в мкс
+    esp_timer_start_periodic(send_timer, NARODMON_PERIOD * 1000000);  // 1 минута в мкс
+}
+
 
 void after_success()
 {
@@ -160,52 +200,55 @@ void after_success()
 }
 void after_failure()
 {
-    ESP_LOGE(TCP_TAG, "Failure sendig to server.");
+    ESP_LOGE(TCP_TAG, "Failure sending to server.");
 
     // 1. Откатываем хвост (не подтверждаем отправку из флешки)
     current_tail_addr = read_tail_from_eeprom();
-
-    // 2. Проверяем время и пишем текущие показания в лог (если время ок)
-	flash_log_all_sensors(gl_last_send_time);
-	ESP_LOGI(TCP_TAG, "Current sensors state saved to Flash.");
 
 	gpio_set_level(BLINK_GPIO, 1); // LED is off
 }
 
 #define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105" //"narodmon.ru"
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 60*5+1  // Perod between sends(seconds) 
-#define TIME_PERIOD_CONN 1000*1 // Period between reconnects
+#define TIME_PERIOD 60*5  // Perod between sends(seconds) 
 
 void tcp_clientTask(void *pvParameters)
 {
-	ulTaskNotifyTake(true, portMAX_DELAY); // Wait for time syncing
     configure_led();
 	init_flash_logger();
-	gl_last_send_time = load_last_send_time(); //Load from nvs last sending time
+	gl_last_send_time = load_last_send_time(); //Load last sending time
 	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
 
+	time_t now;
+	time(&now);
+	printf("Time NOW: %d\n", (int)now);
+	printf("Time of last send: %d\n", (int)gl_last_send_time);
+	int time_to_wait=0;
+	if (now-gl_last_send_time<0 || gl_last_send_time==0) //Последняя передача в будущем или мы считали 0
+		time_to_wait = TIME_PERIOD;
+	else if (now-gl_last_send_time < TIME_PERIOD)  //Валидные данные(наверное))
+		time_to_wait = TIME_PERIOD - (now - gl_last_send_time); // ms
+	if (time_to_wait<0)
+		time_to_wait = TIME_PERIOD;
+	printf("Time to wait : %d second\n", time_to_wait);
+	vTaskDelay(pdMS_TO_TICKS(time_to_wait*1000)); //
+	start_timers();
+		
     char rx_buffer[128];
     int addr_family = 0;
     int ip_protocol = 0;
 
 	int sock=-1;
     while (1) {
-		time_t now;
+		ulTaskNotifyTake(true, portMAX_DELAY); // Wait for time syncing
 		time(&now);
 		printf("Time NOW: %d\n", (int)now);
-		printf("Time of last send: %d\n", (int)gl_last_send_time);
-		int time_to_wait=0;
-		if (now-gl_last_send_time<0 || gl_last_send_time==0) //Последняя передача в будущем или мы считали 0
-			time_to_wait = TIME_PERIOD;
-		else if (now-gl_last_send_time < TIME_PERIOD/1000)  //Валидные данные(наверное))
-			time_to_wait = TIME_PERIOD - (now - gl_last_send_time); // ms
-		if (time_to_wait<0)
-			time_to_wait = TIME_PERIOD;
-		printf("Time to wait : %d second\n", time_to_wait);
-		vTaskDelay(pdMS_TO_TICKS(time_to_wait*1000)); //
-		time(&gl_last_send_time);  //Set last attempt send to server time
-		save_last_send_time(gl_last_send_time); // Write last send time to flash
+
+		// ПРОВЕРКА: А нужно ли нам вообще в сеть?
+		if (current_tail_addr == current_head_addr) {
+			//ESP_LOGI(TCP_TAG, "No new data on flash. Skipping network session.");
+			continue; // Возвращаемся в начало цикла и спим дальше
+		}
 
 		struct hostent *hp = gethostbyname(HOST_IP_ADDR);
 		if (hp == NULL) {
@@ -271,11 +314,15 @@ void tcp_clientTask(void *pvParameters)
             // Data received
             else {
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-                //ESP_LOGI(TCP_TAG, "Received %d bytes from %s:", len, host_ip);
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
 				if (strncmp(rx_buffer,"OK",2)) 
 					after_failure();
-				else{
+				else if(strncmp(rx_buffer, "TIME",4) && strstr(rx_buffer,"> NOW()") != NULL) {
+					ESP_LOGE(TCP_TAG, "Server rejected future timestamp!");
+					save_tail_to_eeprom(current_tail_addr); 
+					ESP_LOGW(TCP_TAG, "Tail moved forward to skip problematic packet.");
+				}
+				else {
 					after_success();
 				}
 				
@@ -297,15 +344,13 @@ void timeTask(void *pvParameters)
 		}
 		time_t now;
 		time(&now);
-		//printf("Time = %u (0x%X)\n", (unsigned )now, (unsigned)now);
-		
 		char payload[35];
 		char timestr[20];
 		struct tm timeinfo;
 		localtime_r(&now, &timeinfo);
 		if (timeinfo.tm_year > 2025-1900) {
 			if (tcp_notify_given==false){
-				xTaskNotifyGive(tcptask);
+//				xTaskNotifyGive(tcptask);
 				tcp_notify_given=true;
 			}
 			//Time

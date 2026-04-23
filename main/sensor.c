@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include "driver/temperature_sensor.h"
 #include "esp_blufi.h"
 #include "esp_mac.h"
@@ -195,10 +196,21 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
             continue;
         }
 
-        // Пакет валиден. Теперь проверяем, влезет ли он в ТЕКСТОВОМ виде
-        char temp_str[2048] = ""; // Временная строка для одного пакета
         uint32_t timestamp;
         memcpy(&timestamp, &packet[2], 4);
+        
+        time_t now;
+        time(&now);
+        // Если пакет старше 30 дней (30 * 24 * 3600 = 2 592 000 сек) или пакет "из будущего"
+        if (now - timestamp > 2592000 || timestamp>now) {
+            ESP_LOGW("FLASH", "Packet too old (%lu), skipping...", timestamp);
+            current_tail_addr = (temp_tail + p_len) % FLASH_TOTAL_SIZE;
+            temp_tail = current_tail_addr; // Продолжаем поиск с нового места
+            continue;
+        }
+
+        // Пакет валиден. Теперь проверяем, влезет ли он в ТЕКСТОВОМ виде
+        char temp_str[2048] = ""; // Временная строка для одного пакета
         
         int ptr = 6;
         while (ptr < p_len - 1) {
@@ -208,8 +220,16 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
             ptr += 4;
 
             char line[128];
-            snprintf(line, sizeof(line), "#%s%d#%.2f#%lu#%s\n", 
-                     get_type_by_id(id), id, val, timestamp, get_label_by_id(id));
+            //if (abs(now - timestamp) < 60) {
+            if (now == timestamp) {
+                // Свежак — шлем без времени (Народмон поставит текущее)
+                snprintf(line, sizeof(line), "#%s%d#%.2f#%s\n", 
+                         get_type_by_id(id), id, val, get_label_by_id(id));
+            } else {
+                // История — шлем с временем
+                snprintf(line, sizeof(line), "#%s%d#%.2f#%lu#%s\n", 
+                         get_type_by_id(id), id, val, timestamp, get_label_by_id(id));
+            }
             strcat(temp_str, line);
         }
 
@@ -244,34 +264,7 @@ void get_narodmon_string(char *data, size_t max_len)
              "#AP:" MACSTR "#%d\n", MAC2STR(ap_info.bssid), ap_info.rssi);
     }
 
-    // 3. Динамический опрос всех датчиков из нашего массива
-    for (int i = 0; i < sensor_count; i++) {
-        char sensor_line[64];
-        
-        // Формируем уникальный ключ датчика (например, T1, T2 или по его ID)
-        // Народмон любит короткие ключи, поэтому используем type_name + ID
-        if (all_sensors[i].val_type == VAL_TYPE_FLOAT) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%.2f#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.f, all_sensors[i].label);
-        } 
-        else if (all_sensors[i].val_type == VAL_TYPE_BOOL) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.b ? 1 : 0, all_sensors[i].label);
-        }
-        else if (all_sensors[i].val_type == VAL_TYPE_INT) {
-            snprintf(sensor_line, sizeof(sensor_line), "#%s%d#%d#%s\n", 
-                     all_sensors[i].type_name, all_sensors[i].id, 
-                     all_sensors[i].value.i, all_sensors[i].label);
-        }
-        // Добавляем строку в общий буфер, если есть место
-        if (strlen(data) + strlen(sensor_line) < max_len - 3) {
-            strcat(data, sensor_line);
-        }
-    }
-
-	// Выгрузка истории (если она есть)
+	// Выгрузка истории с флэшки
     char *one_packet_buf = malloc(2048);//[2048];
 
     // Добавляем из истории, пока get_one_flash_packet_string говорит "True"
