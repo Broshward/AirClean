@@ -25,6 +25,9 @@
 static const char *TCP_TAG = "TCP_IP";
 RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
+// Переменная интервала отправки на сервер (по умолчанию 300 сек)
+uint32_t log_interval_sec = 300;
+
 #define BLINK_GPIO 8
 void configure_led(void)
 {
@@ -177,7 +180,7 @@ void start_timers()
     esp_timer_create(&log_timer_args, &log_timer);
     esp_timer_create(&send_timer_args, &send_timer);
 
-    esp_timer_start_periodic(log_timer, WRITE_PERIOD * 1000000); // 5 минут в мкс
+    esp_timer_start_periodic(log_timer, log_interval_sec  * 1000000); // 5 минут в мкс
     esp_timer_start_periodic(send_timer, NARODMON_PERIOD * 1000000);  // 1 минута в мкс
 }
 
@@ -317,7 +320,7 @@ void tcp_clientTask(void *pvParameters)
                 ESP_LOGI(TCP_TAG, "Answer: %s", rx_buffer);
 				if (strncmp(rx_buffer,"OK",2)) 
 					after_failure();
-				else if(strncmp(rx_buffer, "TIME",4) && strstr(rx_buffer,"> NOW()") != NULL) {
+				else if(strstr(rx_buffer, "TIME")!=NULL && strstr(rx_buffer,"> NOW") != NULL) {
 					ESP_LOGE(TCP_TAG, "Server rejected future timestamp!");
 					save_tail_to_eeprom(current_tail_addr); 
 					ESP_LOGW(TCP_TAG, "Tail moved forward to skip problematic packet.");

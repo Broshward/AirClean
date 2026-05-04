@@ -24,6 +24,7 @@ static int sensor_count = 0;
 
 uint32_t prev_tail_addr = 0; // Это нужно, чтобы не перезаписывать одно и тоже значение
 
+// Функция устанавливает значение датчика в массиве датчиков, добавляет датчик, если он отсутствует. 
 void sensor_set_value(int id, value_type_t v_type, const char* name, const char* label, sensor_data_t new_val) 
 {
     // 1. Сначала ищем: может такой датчик уже есть?
@@ -50,7 +51,7 @@ void sensor_set_value(int id, value_type_t v_type, const char* name, const char*
 }
 
 #define MAX_BLUFI_PACKET 128 // Оптимальный размер для стабильной передачи
-
+// Функция отправляет значения всех датчиков в блутус канал
 void send_sensors_values(void) 
 {
     if (sensor_count == 0) return;
@@ -103,6 +104,7 @@ void send_sensors()
 	send_ble_data(out_buffer);
 }
 
+// Функция пишет лог(значения) всех датчиков на флешку
 void flash_log_all_sensors(uint32_t timestamp) 
 {
     uint8_t buf[259]; // Временный буфер для сборки пакета
@@ -154,6 +156,7 @@ void flash_log_all_sensors(uint32_t timestamp)
 	save_head_to_eeprom(current_head_addr);
 }
 
+// Функция возращает label датчика из массива
 const char* get_label_by_id(int id) 
 {
     for (int i = 0; i < sensor_count; i++) {
@@ -162,6 +165,7 @@ const char* get_label_by_id(int id)
     return "unknown";
 }
 
+// Функция возращает тип датчика из массива
 const char* get_type_by_id(int id) 
 {
     for (int i = 0; i < sensor_count; i++) {
@@ -170,6 +174,7 @@ const char* get_type_by_id(int id)
     return "U"; // Unknown
 }
 
+// Функция возвращает строку одного пакета(по времени) записи датчиков в текстовом виде(в соответствии с narodmon API)
 bool get_one_flash_packet_string(char *out_str, size_t free_space) 
 {
     uint8_t packet[259]; 
@@ -247,6 +252,7 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
     return false;
 }
 
+// Функция возращает строку для narodmon, содержащую текущие показания или(и) историю показаний датчиков 
 void get_narodmon_string(char *data, size_t max_len) 
 {
     // 1. Текущие данные
@@ -280,11 +286,13 @@ void get_narodmon_string(char *data, size_t max_len)
 #define EEPROM_ADDR_HEAD 0x00
 #define EEPROM_ADDR_TAIL 0x04
 
+// Функция сохраняет текущий адрес записи показаний в еепром часов
 void save_head_to_eeprom(uint32_t head) 
 {
     mcp_eeprom_write_bytes(EEPROM_ADDR_HEAD, (uint8_t*)&head, 4);
 }
 
+// Функция сохраняет первый ещё неотправленный адрес в еепром часов 
 void save_tail_to_eeprom(uint32_t tail) 
 {
     // 1. Проверяем: изменился ли хвост по сравнению с тем, что уже в EEPROM?
@@ -301,6 +309,7 @@ void save_tail_to_eeprom(uint32_t tail)
     }
 }
 
+// Функция читает из еепрома часов адрес головы лога
 uint32_t read_head_from_eeprom() 
 {
     uint32_t head = 0;
@@ -314,6 +323,7 @@ uint32_t read_head_from_eeprom()
     return head;
 }
 
+// Функция читает адрес "хвоста" лога(то, что ещё не отправлено на сервер)
 uint32_t read_tail_from_eeprom() 
 {
     uint32_t tail = 0;
@@ -326,6 +336,7 @@ uint32_t read_tail_from_eeprom()
     return tail;
 }
 
+ 
 void init_flash_logger() 
 {
     // 1. Инициализируем SPI для флешки
@@ -339,4 +350,88 @@ void init_flash_logger()
     ESP_LOGI("LOGGER", "Flash Logger Ready. Head: %u, Tail: %u", 
              current_head_addr, current_tail_addr);
 }
+
+bool check_crc(uint8_t *packet, uint16_t p_len)
+{
+	uint8_t sum = 0;
+	for (int i = 0; i < p_len - 1; i++) sum += packet[i];
+	return (sum == packet[p_len-1]);
+}
+
+void dump_history_safe(int target_id, uint16_t max_packets, uint8_t step) 
+{
+    uint8_t *packet = (uint8_t *)malloc(259);
+    if (!packet) return;
+
+    // 1. Считаем целевое время (глубина истории)
+    uint32_t target_time = (uint32_t)gl_last_send_time - (max_packets * log_interval_sec);
+    
+    // 2. Примерно прыгаем назад (даже если промахнемся - не страшно)
+    uint32_t total_offset = max_packets * (7 + (sensor_count * 5));
+    uint32_t curr_addr = (current_head_addr >= total_offset) ? 
+                         (current_head_addr - total_offset) : 
+                         (FLASH_TOTAL_SIZE - (total_offset - current_head_addr));
+
+    uint32_t bytes_scanned = 0;
+    uint16_t found_count = 0;
+    uint16_t step_counter = 0;
+
+    // ГЛАВНОЕ УСЛОВИЕ: не более одного полного круга флешки
+    while (bytes_scanned < FLASH_TOTAL_SIZE) {
+        uint8_t header[2];
+        flash_read_data(curr_addr, header, 2);
+
+        if (header[0] == 0xAA) {
+            uint16_t p_len = header[1] + 3;
+            flash_read_data(curr_addr, packet, p_len);
+
+            if (check_crc(packet, p_len)) {
+                uint32_t p_time; 
+                memcpy(&p_time, &packet[2], 4);
+
+                // Если мы нашли пакет, который СТАРШЕ нужного нам времени,
+                // значит мы отмотали слишком далеко. Просто идем вперед до нужного времени.
+                if (p_time >= target_time) {
+                    if (step_counter % step == 0) {
+						flash_read_data(curr_addr, packet, p_len);
+						if (check_crc(packet, p_len)) {
+							uint32_t p_time; memcpy(&p_time, &packet[2], 4);
+							
+							// Ищем в пакете только нужный ID
+							int ptr = 6;
+							while (ptr < p_len - 1) {
+								uint8_t id = packet[ptr++];
+								float val; memcpy(&val, &packet[ptr], 4);
+								ptr += 4;
+
+								if (id == target_id) {
+									char ble_str[64];
+									snprintf(ble_str, sizeof(ble_str), "H|%lu|%d:%.1f", p_time, id, val);
+									send_ble_data(ble_str);
+									vTaskDelay(pdMS_TO_TICKS(15)); 
+									break; 
+								}
+							}
+						}
+                        found_count++;
+                        if (found_count >= max_packets) break; // Нашли сколько просили - выходим
+                    }
+                    step_counter++;
+                }
+                
+                curr_addr = (curr_addr + p_len) % FLASH_TOTAL_SIZE;
+                bytes_scanned += p_len;
+                // Если мы "догнали" голову - история закончилась
+                if (curr_addr == current_head_addr) break; 
+                continue;
+            }
+        }
+        curr_addr = (curr_addr + 1) % FLASH_TOTAL_SIZE;
+        bytes_scanned++;
+        if (curr_addr == current_head_addr) break;
+    }
+    free(packet);
+    ESP_LOGI("HIST", "Scan finished. Bytes scanned: %u", bytes_scanned);
+}
+
 

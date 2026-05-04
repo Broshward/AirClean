@@ -36,3 +36,4 @@ void save_tail_to_eeprom(uint32_t tail);
 uint32_t read_head_from_eeprom();
 uint32_t read_tail_from_eeprom();
 void init_flash_logger();
+void dump_history_safe(int target_id, uint16_t max_packets, uint8_t step);

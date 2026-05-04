@@ -103,15 +103,15 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 				// Обрабатываем команду
 				if (strcmp(cmd_str, "GET_SENSORS") == 0)
 					send_sensors();
-				else if (strcmp(cmd_str, "GET_NET") == 0)
+				if (strcmp(cmd_str, "GET_NET") == 0)
 					get_net();
-				else if (strncmp(cmd_str, "SET_STATIC:", 11) == 0)
+				if (strncmp(cmd_str, "SET_STATIC:", 11) == 0)
 					set_static(cmd_str);
-				else if (strcmp(cmd_str, "SET_DHCP") == 0)
+				if (strcmp(cmd_str, "SET_DHCP") == 0)
 					set_dhcp();
-				else if (strcmp(cmd_str, "GET_SYNC_TIME") == 0) 
+				if (strcmp(cmd_str, "GET_SYNC_TIME") == 0) 
 					send_last_sync_sntp();
-				else if (strncmp(cmd_str, "SET_TZ:", 7) == 0) {
+				if (strncmp(cmd_str, "SET_TZ:", 7) == 0) {
 					int offset = atoi(cmd_str + 7);
 					save_tz_to_nvs(offset);
 					set_timezone(offset);
@@ -128,11 +128,23 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 				if (strcmp(cmd_str, "RESET") == 0) { // Program reset
 					esp_restart();
 				}
-
-
-				else if (strcmp(cmd_str, "GET_LOGS") == 0) {
+				if (strcmp(cmd_str, "GET_LOGS") == 0) {
 					 // Начинаем выгрузку флешки
 				}
+				if (strncmp(cmd_str, "HIST:", 5) == 0) {
+					int target_id;
+					int count;
+					int step;
+
+					// sscanf — лучший друг для разбора строк с разделителями
+					if (sscanf(cmd_str, "HIST:%d:%d:%d", &target_id, &count, &step) == 3) {
+						ESP_LOGI("GATTS", "Запрос истории: ID %d, Кол-во %d, Шаг %d", target_id, count, step);
+						
+						// Вызываем нашу функцию (которую мы написали раньше)
+						dump_history_safe(target_id, count, step);
+					}
+				}
+
 				free(cmd_str);
 			}
 			break;

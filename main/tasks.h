@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <time.h>
 #include "esp_err.h"
 #include "esp_bt_defs.h"
 
@@ -17,3 +18,5 @@ extern float gl_temp;
 extern float gl_chip_temp;
 extern uint8_t gl_temperature[2];
 
+extern time_t gl_last_send_time;
+extern uint32_t log_interval_sec;
