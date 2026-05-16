@@ -385,3 +385,17 @@ void test(void *pvParameters)
 	}
 }
 
+void history_export_task(void *pvParameters) 
+{
+    while (1) {
+        // Задача спит и ждет уведомления (бинарного семафора) от FreeRTOS
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        
+        ESP_LOGI("HIST_TASK", "Starting long history dump from dedicated task...");
+        
+        // Теперь эта тяжелая функция работает в своем собственном потоке!
+        dump_history_all(); 
+        
+        ESP_LOGI("HIST_TASK", "History dump finished, going to sleep.");
+    }
+}

@@ -31,3 +31,7 @@ esp_err_t esp_blufi_controller_deinit(void);
 void get_net();
 void set_static(char *cmd);
 void set_dhcp();
+
+#include "freertos/FreeRTOS.h"
+extern TaskHandle_t history_task_handle;
+extern TaskHandle_t tcptask;

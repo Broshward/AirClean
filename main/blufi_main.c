@@ -86,6 +86,8 @@ TaskHandle_t tcptask;
 TaskHandle_t reconnect_task;
 void reconnectTask(void *pvParameters);
 SemaphoreHandle_t ble_send_mutex;
+TaskHandle_t history_task_handle = NULL;
+
 
 void get_net()
 {
@@ -699,5 +701,14 @@ void app_main(void)
 
 	xTaskCreate( timeTask, "Time", 4096, NULL, 1, NULL); //Task for times 
 //	xTaskCreate( test, "Test", 4096, NULL, 1, NULL); //Task for test SPI
+	
+	xTaskCreate(
+		history_export_task,    // Функция задачи
+		"history_task",         // Имя для отладки
+		4096,                   // Размер стека (4КБ хватит с запасом)
+		NULL,                   // Параметры
+		3,                      // Приоритет (небольшой, чтобы не мешать BLE)
+		&history_task_handle   // Хэндл задачи
+	);
 
 }

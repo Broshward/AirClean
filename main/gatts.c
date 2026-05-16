@@ -8,6 +8,7 @@
 
 #include "gatts.h"
 #include "sensor.h"
+#include "spi.h"
 #include "blufi.h"
 #include "times.h"
 #include "ota.h"
@@ -143,6 +144,29 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 						// Вызываем нашу функцию (которую мы написали раньше)
 						dump_history_safe(target_id, count, step);
 					}
+				}
+				if (strcmp(cmd_str, "HISTORY_ALL") == 0) {
+					ESP_LOGI("GATTS", "Received HISTORY_ALL request, waking up history_task");
+					
+					if (history_task_handle != NULL) {
+						// Разблокируем нашу задачу отправки истории
+						xTaskNotifyGive(history_task_handle); 
+					} else {
+						ESP_LOGE("GATTS", "history_task_handle is NULL!");
+					}
+					// Мгновенно выходим из колбэка. Стек BLE свободен и продолжает дышать!
+				}
+				if (strcmp(cmd_str, "SKIP_QUEUE") == 0) {
+					ESP_LOGW("GATTS", "Command SKIP_QUEUE received. Synchronizing Tail with Head...");
+					
+					// Приравниваем указатели в оперативной памяти
+					current_tail_addr = current_head_addr;
+					
+					// Железно фиксируем новое состояние в EEPROM часов, используя наш "умный" метод
+					save_tail_to_eeprom(current_tail_addr);
+					
+					// Опционально: шлем подтверждение во Flutter, если нужно обновить интерфейс
+					send_ble_data("SKIP_OK");
 				}
 
 				free(cmd_str);
