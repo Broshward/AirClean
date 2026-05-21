@@ -696,7 +696,7 @@ void app_main(void)
 
 	xTaskCreate( sensorsTask, "Light", 4096, NULL, 1, NULL);
 
-	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 1, &tcptask);
+	xTaskCreate( tcp_clientTask, "TCP-client", 10000, NULL, 3, &tcptask);
 	xTaskCreate( reconnectTask, "reconnect Wifi", 4096,NULL, 1, &reconnect_task); //Task for WiFi reconnect
 
 	xTaskCreate( timeTask, "Time", 4096, NULL, 1, NULL); //Task for times 
@@ -707,7 +707,7 @@ void app_main(void)
 		"history_task",         // Имя для отладки
 		4096,                   // Размер стека (4КБ хватит с запасом)
 		NULL,                   // Параметры
-		3,                      // Приоритет (небольшой, чтобы не мешать BLE)
+		2,                      // Приоритет (небольшой, чтобы не мешать BLE)
 		&history_task_handle   // Хэндл задачи
 	);
 

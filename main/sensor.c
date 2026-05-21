@@ -150,7 +150,7 @@ void flash_log_all_sensors(uint32_t timestamp)
     buf[ptr++] = crc;
 
     // Теперь пишем буфер на флешку по адресу head
-     flash_write_data(buf, ptr);
+     flash_write_data_safe(buf, ptr);
     
     // Обновляем head в eeprom-памяти часов
 	save_head_to_eeprom(current_head_addr);
@@ -183,7 +183,7 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
 
     while (temp_tail != current_head_addr) {
         uint8_t header[2];
-        flash_read_data(temp_tail, header, 2);
+        flash_read_data_safe(temp_tail, header, 2);
 
         if (header[0] != 0xAA) {
             temp_tail = (temp_tail + 1) % FLASH_TOTAL_SIZE;
@@ -191,7 +191,7 @@ bool get_one_flash_packet_string(char *out_str, size_t free_space)
         }
 
         p_len = header[1] + 3; 
-        flash_read_data(temp_tail, packet, p_len);
+        flash_read_data_safe(temp_tail, packet, p_len);
 
         // Проверка CRC
         uint8_t sum = 0;
@@ -379,11 +379,11 @@ void dump_history_safe(int target_id, uint16_t max_packets, uint8_t step)
     // ГЛАВНОЕ УСЛОВИЕ: не более одного полного круга флешки
     while (bytes_scanned < FLASH_TOTAL_SIZE) {
         uint8_t header[2];
-        flash_read_data(curr_addr, header, 2);
+        flash_read_data_safe(curr_addr, header, 2);
 
         if (header[0] == 0xAA) {
             uint16_t p_len = header[1] + 3;
-            flash_read_data(curr_addr, packet, p_len);
+            flash_read_data_safe(curr_addr, packet, p_len);
 
             if (check_crc(packet, p_len)) {
                 uint32_t p_time; 
@@ -393,7 +393,7 @@ void dump_history_safe(int target_id, uint16_t max_packets, uint8_t step)
                 // значит мы отмотали слишком далеко. Просто идем вперед до нужного времени.
                 if (p_time >= target_time) {
                     if (step_counter % step == 0) {
-						flash_read_data(curr_addr, packet, p_len);
+						flash_read_data_safe(curr_addr, packet, p_len);
 						if (check_crc(packet, p_len)) {
 							uint32_t p_time; memcpy(&p_time, &packet[2], 4);
 							
@@ -436,69 +436,87 @@ void dump_history_safe(int target_id, uint16_t max_packets, uint8_t step)
 
 #define CHUNK_SIZE 256 // Читаем флешку страницами
 
-void dump_history_all(void) 
+void dump_history_all(bool unsent)
 {
-    uint8_t *chunk_buf = (uint8_t *)malloc(CHUNK_SIZE);
     uint8_t *packet = (uint8_t *)malloc(259);
-    if (!chunk_buf || !packet) {
-        ESP_LOGE("GATTS", "No memory for export buffers");
-        if (chunk_buf) free(chunk_buf);
-        if (packet) free(packet);
-        return;
-    }
+    if (!packet) return;
 
     send_ble_data("EXPORT_START");
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    uint32_t curr_addr = current_head_addr;
-    uint32_t bytes_scanned = 0;
-    uint32_t loop_counter = 0;
-	bool send=0;
+    uint32_t curr_addr = 0;
 
 	int packet_num=0;
+	bool send = false;
 	time_t send_time;
 	time_t search_time;
 	time(&search_time);
 	printf("Search!\n");
 
-    while (bytes_scanned < FLASH_TOTAL_SIZE) {
-        // Читаем флешку большим куском в ОЗУ
-        flash_read_raw(curr_addr, chunk_buf, CHUNK_SIZE);
+    // --- ЭТАП 1: ОПРЕДЕЛЕНИЕ ТОЧКИ СТАРТА ---
+    if (unsent) {
+        // Для непереданных стартуем строго с хвоста Народмона
+        curr_addr = current_tail_addr;
+    } else {
+        // Для всей истории: стартуем с "головы + 1", ища первый маркер 0xAA чанками
+        uint32_t search_addr = (current_head_addr + 1) % FLASH_TOTAL_SIZE;
+        uint32_t bytes_checked = 0;
+        uint8_t chunk[64]; // Маленький чанк для быстрого поиска маркера
 
-        for (uint16_t i = 0; i < CHUNK_SIZE; i++) {
-            // Каждые 4000 байт общего прогресса даем системе "подышать"
-            if (++loop_counter >= 4000) {
-                loop_counter = 0;
-                vTaskDelay(1); 
-            }
-
-            if (chunk_buf[i] == 0xAA) {
-                // Нашли маркер! Вычисляем его физический адрес на флешке
-                uint32_t pkt_addr = (curr_addr + i) % FLASH_TOTAL_SIZE;
-                
-                // Читаем длину, которая лежит в следующем байте
-                uint8_t len_byte = 0;
-                flash_read_raw((pkt_addr + 1) % FLASH_TOTAL_SIZE, &len_byte, 1);
-                
-                uint16_t actual_p_len = len_byte + 3;
-
-                if (actual_p_len < 7 || actual_p_len > 259) {
-                    continue; // Мусорный маркер, ищем дальше в буфере
+        while (bytes_checked < FLASH_TOTAL_SIZE) {
+            flash_read_data_safe(search_addr, chunk, sizeof(chunk));
+            bool found = false;
+            
+            for (int i = 0; i < sizeof(chunk); i++) {
+                if (chunk[i] == 0xAA) {
+                    curr_addr = (search_addr + i) % FLASH_TOTAL_SIZE;
+                    found = true;
+                    break;
                 }
+            }
+            if (found) break; // Нашли начало истории, выходим из поиска
+            
+            search_addr = (search_addr + sizeof(chunk)) % FLASH_TOTAL_SIZE;
+            bytes_checked += sizeof(chunk);
+            
+            // Защита WDT при поиске
+            if (bytes_checked % 4096 == 0) vTaskDelay(1);
+        }
+        
+        // Если флешка девственно пуста и маркер не найден — стартуем с 0
+        if (bytes_checked >= FLASH_TOTAL_SIZE) curr_addr = 0;
+    }
 
-                // Вычитываем весь пакет целиком
-                flash_read_raw(pkt_addr, packet, actual_p_len);
+    // --- ЭТАП 2: ВЫГРУЗКА ПАКЕТАМИ (Линейная и прозрачная) ---
+    ESP_LOGI("HIST", "Starting stream export from addr: %u", curr_addr);
+	
+	printf("First packet address is %d\n",(int)curr_addr);
 
-                if (check_crc(packet, actual_p_len)) {
+    uint32_t total_scanned_bytes = 0;
+    uint16_t burst_counter = 0;
+
+    // Читаем строго пакет за пакетом, пока не упремся в текущую голову
+    // Или пока не проверим всю флешку (защита от зацикливания)
+    while (curr_addr != current_head_addr && total_scanned_bytes < FLASH_TOTAL_SIZE) {
+        uint8_t header[2];
+        flash_read_data_safe(curr_addr, header, 2);
+
+        if (header[0] == 0xAA) {
+            uint16_t p_len = header[1] + 3; // Реальная длина из байта Len
+
+            if (p_len >= 7 && p_len <= 259) {
+                // Вычитываем пакет со флешки ОДИН раз целиком
+                flash_read_data_safe(curr_addr, packet, p_len);
+
+                if (check_crc(packet, p_len)) {
                     uint32_t p_time;
-                    // Исправлено: время лежит со 2-го индекса (пропускаем 0xAA и Len)
-                    memcpy(&p_time, &packet[2], 4); 
+                    memcpy(&p_time, &packet[2], 4);
 
                     char ble_str[256];
                     snprintf(ble_str, sizeof(ble_str), "E|%lu|", (unsigned long)p_time);
                     
                     int ptr = 6;
-                    while (ptr < actual_p_len - 1) {
+                    while (ptr < p_len - 1) {
                         uint8_t id = packet[ptr++];
                         float val;
                         memcpy(&val, &packet[ptr], 4);
@@ -509,52 +527,51 @@ void dump_history_all(void)
                         strcat(ble_str, sub);
                     }
                     
+                    // Безопасная отправка через твою функцию с МЬЮТЕКСОМ
+                    send_ble_data(ble_str); 
+                    
                     if (!send){
 						time(&send_time);
 						printf("Search done (%d sec)\n", (int)(send_time-search_time));
 						printf("Send!\n");
-						send=1;
+						send=true;
 					}
-					send_ble_data(ble_str);
 					packet_num++;
-                    
-                    // Перепрыгиваем обработанный пакет внутри нашего буфера чанка,
-                    // если он помещается в текущий CHUNK_SIZE
-                    if (i + actual_p_len < CHUNK_SIZE) {
-                        i += (actual_p_len - 1); // -1 т.к. цикл for сделает i++
-                    } else {
-                        // Если пакет вылез за пределы чанка, просто корректируем адреса для следующего чтения флешки
-                        uint32_t skip = CHUNK_SIZE - i;
-                        bytes_scanned += (actual_p_len - skip);
-                        curr_addr = (pkt_addr + actual_p_len) % FLASH_TOTAL_SIZE;
-                        i = CHUNK_SIZE; // Выходим из внутреннего цикла for, чтобы прочитать новый чанк
+
+                    // Шаг вперед строго на длину пакета
+                    curr_addr = (curr_addr + p_len) % FLASH_TOTAL_SIZE;
+                    total_scanned_bytes += p_len;
+
+                    // Потоковый контроль BLE-стека: пауза каждые 15 пакетов
+                    if (++burst_counter >= 50) {
+                        burst_counter = 0;
+                        vTaskDelay(pdMS_TO_TICKS(10)); // Даем радиомодулю выдохнуть
                     }
-                    
-                    loop_counter = 0;
-					//vTaskDelay(pdMS_TO_TICKS(10)); // Короткий вдох для радиомодуля каждые 10 пакетов
-					static uint16_t ble_packet_burst_counter = 0;
-					if (++ble_packet_burst_counter >= 50) {
-						ble_packet_burst_counter = 0;
-						vTaskDelay(pdMS_TO_TICKS(10)); // Короткий вдох для радиомодуля каждые 10 пакетов
-					}
+                    continue;
                 }
-            }
-            bytes_scanned++;
-            if (bytes_scanned >= FLASH_TOTAL_SIZE) break;
+            } else {
+				ESP_LOGI("HIST" , "Packet %d is wrong", packet_num);
+			}
         }
         
-        // Сдвигаем адрес чтения флешки на размер обработанного чанка
-        curr_addr = (curr_addr + CHUNK_SIZE) % FLASH_TOTAL_SIZE;
+        // Если под курсором не маркер или пакет битый — сдвигаемся на 1 байт
+        curr_addr = (curr_addr + 1) % FLASH_TOTAL_SIZE;
+        total_scanned_bytes++;
+
+        // Защита WDT при побайтовом пропуске мусора
+//        if (total_scanned_bytes % 2000 == 0) vTaskDelay(1);
     }
+
 	time_t now;
 	time(&now);
 	printf("send done (%d sec), %d packets sent\n",(int)(now-send_time), packet_num);
+	printf("Last send packet address is %d\n",(int)curr_addr);
+	printf("Head address %d\n",(int)current_head_addr);
 
     free(packet);
-    free(chunk_buf);
     
     vTaskDelay(pdMS_TO_TICKS(100));
     send_ble_data("EXPORT_DONE");
-    ESP_LOGI("HIST_TASK", "Safe buffered export finished!");
+    ESP_LOGI("HIST", "Export process completely finished.");
 }
 

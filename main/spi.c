@@ -15,6 +15,8 @@ spi_device_handle_t flash_spi;
 uint32_t current_head_addr = 0;
 uint32_t current_tail_addr = 0;
 
+SemaphoreHandle_t flash_spi_mutex = NULL;
+
 void init_external_flash_spi() 
 {
     spi_bus_config_t buscfg = {
@@ -41,6 +43,7 @@ void init_external_flash_spi()
     ret = spi_bus_add_device(SPI2_HOST, &devcfg, &flash_spi);
     ESP_ERROR_CHECK(ret);
 
+	flash_spi_mutex = xSemaphoreCreateMutex();
     ESP_LOGI("FLASH", "SPI initialized on GPIO 5,6,7,10");
 }
 
@@ -214,7 +217,7 @@ void flash_read_data(uint32_t addr, uint8_t *dest, uint16_t len)
     // Если адрес за пределами (например, после прошлой записи), сбрасываем в 0
     if (curr_addr >= FLASH_TOTAL_SIZE) curr_addr = 0;
 
-    // Проверяем: пересекаем ли мы границу конца флешки?
+    // Проверяем: пересекаем ли мы конец флешки?
     if (curr_addr + len > FLASH_TOTAL_SIZE) {
         // Читаем первую часть до конца флешки
         uint16_t part1 = FLASH_TOTAL_SIZE - curr_addr;
@@ -228,3 +231,22 @@ void flash_read_data(uint32_t addr, uint8_t *dest, uint16_t len)
     }
 }
 
+void flash_read_data_safe(uint32_t addr, uint8_t *dest, uint16_t len) 
+{
+    if (xSemaphoreTake(flash_spi_mutex, portMAX_DELAY) == pdTRUE) {
+        flash_read_data(addr, dest, len);
+        xSemaphoreGive(flash_spi_mutex);
+    } else {
+        ESP_LOGE("SPI_SAFE", "Timeout waiting for SPI bus!");
+    }
+}
+
+void flash_write_data_safe(uint8_t *data, uint16_t len) 
+{
+    if (xSemaphoreTake(flash_spi_mutex, portMAX_DELAY) == pdTRUE) {
+		flash_write_data(data, len);
+        xSemaphoreGive(flash_spi_mutex);
+    } else {
+        ESP_LOGE("SPI_SAFE", "Timeout waiting for SPI bus!");
+    }
+}

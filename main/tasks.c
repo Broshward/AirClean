@@ -28,6 +28,8 @@ RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 // Переменная интервала отправки на сервер (по умолчанию 300 сек)
 uint32_t log_interval_sec = 300;
 
+bool gl_unsent=false; // Это нужно, для выгрузки истории
+
 #define BLINK_GPIO 8
 void configure_led(void)
 {
@@ -165,7 +167,6 @@ void timer_sending_cb(void* arg)
     xTaskNotifyGive(tcptask); 
 }
 
-#define WRITE_PERIOD 60*5  // Period between log writes(seconds) 
 #define NARODMON_PERIOD 60 // Period between narodmon sends(second)
 void start_timers() 
 {
@@ -394,7 +395,7 @@ void history_export_task(void *pvParameters)
         ESP_LOGI("HIST_TASK", "Starting long history dump from dedicated task...");
         
         // Теперь эта тяжелая функция работает в своем собственном потоке!
-        dump_history_all(); 
+        dump_history_all(gl_unsent); 
         
         ESP_LOGI("HIST_TASK", "History dump finished, going to sleep.");
     }

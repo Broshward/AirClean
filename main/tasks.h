@@ -20,4 +20,7 @@ extern uint8_t gl_temperature[2];
 extern time_t gl_last_send_time;
 extern uint32_t log_interval_sec;
 
+extern bool gl_unsent; 
+
+
 

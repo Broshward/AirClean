@@ -4,3 +4,9 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 void send_ble_data(const char* data);
 
 extern SemaphoreHandle_t ble_send_mutex;
+
+
+extern uint16_t sensor_handle;
+extern uint16_t command_handle;
+extern esp_gatt_if_t sensor_gatt_if;
+extern uint16_t sensor_conn_id;

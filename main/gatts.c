@@ -12,6 +12,7 @@
 #include "blufi.h"
 #include "times.h"
 #include "ota.h"
+#include "tasks.h"
 
 // Глобальные переменные для нашего нового канала
 uint16_t sensor_handle;
@@ -47,11 +48,18 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
                 .uuid.uuid16 = 0xFF01, // UUID характеристики
             };
             
+			uint8_t dummy_value[256] = {0};
+			esp_attr_value_t char_val = {
+				.attr_max_len = 256,      // МАКСИМАЛЬНАЯ ДЛИНА СТРОКИ
+				.attr_len     = 0,
+				.attr_value   = dummy_value,
+			};
+
             // Права: Чтение + Уведомление (Notify)
             esp_ble_gatts_add_char(param->create.service_handle, &char_uuid, 
                                    ESP_GATT_PERM_READ, 
                                    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY, 
-                                   NULL, NULL);
+                                   &char_val, NULL);
             break;
 
 		case ESP_GATTS_ADD_CHAR_EVT:
@@ -69,8 +77,19 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 			break;
 		
         case ESP_GATTS_CONNECT_EVT:
-            sensor_conn_id = param->connect.conn_id;
-            ESP_LOGI("GATTS", "Наш канал датчиков подключен!");
+                sensor_conn_id = param->connect.conn_id;
+				ESP_LOGI("GATTS", "BLE connected, updating connection parameters...");
+
+//				// Формируем запрос на скоростные параметры связи (Low Latency / High Speed)
+//				esp_ble_conn_update_params_t conn_params = {0};
+//				memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+//				conn_params.min_int = 0x0009; // 9 * 1.25мс = 11.25 мс (минум по спецификации)
+//				conn_params.max_int = 0x000C; // 12 * 1.25мс = 15 мс (максимум для разгона)
+//				conn_params.latency = 0;           // Без задержки пропуска пакетов
+//				conn_params.timeout = 400;         // Таймаут 4 секунды
+//
+//				// Отправляем запрос мастеру (смартфону)
+//				esp_ble_gap_update_conn_params(&conn_params);
             break;
 
         case ESP_GATTS_DISCONNECT_EVT:
@@ -149,12 +168,23 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 					ESP_LOGI("GATTS", "Received HISTORY_ALL request, waking up history_task");
 					
 					if (history_task_handle != NULL) {
+						gl_unsent=false; //Вся история
 						// Разблокируем нашу задачу отправки истории
 						xTaskNotifyGive(history_task_handle); 
 					} else {
 						ESP_LOGE("GATTS", "history_task_handle is NULL!");
 					}
 					// Мгновенно выходим из колбэка. Стек BLE свободен и продолжает дышать!
+				}
+				if (strcmp(cmd_str, "HISTORY_UNSENT") == 0) {
+					ESP_LOGI("GATTS", "Received HISTORY_UNSENT request");
+					if (history_task_handle != NULL) {
+						gl_unsent = true; // Только непереданное
+						// Разблокируем нашу задачу отправки истории
+						xTaskNotifyGive(history_task_handle); 
+					} else {
+						ESP_LOGE("GATTS", "history_task_handle is NULL!");
+					}
 				}
 				if (strcmp(cmd_str, "SKIP_QUEUE") == 0) {
 					ESP_LOGW("GATTS", "Command SKIP_QUEUE received. Synchronizing Tail with Head...");
@@ -182,10 +212,30 @@ void send_ble_data(const char* data)
 {
     if (sensor_gatt_if == ESP_GATT_IF_NONE || sensor_conn_id == 0xffff) return;
 
-    if (xSemaphoreTake(ble_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        esp_ble_gatts_send_indicate(sensor_gatt_if, sensor_conn_id, sensor_handle, 
-                                    strlen(data), (uint8_t *)data, false);
+    if (xSemaphoreTake(ble_send_mutex, portMAX_DELAY) == pdTRUE) {
+		esp_err_t send_err;
+		int retry_count = 0;
+		do {
+
+			send_err = esp_ble_gatts_send_indicate(sensor_gatt_if, sensor_conn_id, sensor_handle, 
+												   strlen(data), (uint8_t *)data, false);
+			
+			if (send_err == ESP_ERR_NO_MEM) {
+				// Очередь забита! Спим 5-10 мс, давая радиомодулю опустошить буфер
+				vTaskDelay(pdMS_TO_TICKS(10));
+				retry_count++;
+			}
+		} while (send_err != ESP_OK); 
+
         xSemaphoreGive(ble_send_mutex);
     }
+
+//    if (sensor_gatt_if == ESP_GATT_IF_NONE || sensor_conn_id == 0xffff) return;
+//
+//    if (xSemaphoreTake(ble_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+//        esp_ble_gatts_send_indicate(sensor_gatt_if, sensor_conn_id, sensor_handle, 
+//                                    strlen(data), (uint8_t *)data, false);
+//        xSemaphoreGive(ble_send_mutex);
+//    }
 }
 
