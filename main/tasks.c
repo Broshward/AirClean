@@ -9,6 +9,8 @@
 #include "driver/temperature_sensor.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #include "tasks.h"
 #include "blufi.h"
@@ -27,8 +29,52 @@ RTC_DATA_ATTR time_t gl_last_send_time=0; // Last time in RTC SRAM part
 
 // Переменная интервала отправки на сервер (по умолчанию 300 сек)
 uint32_t log_interval_sec = 300;
+esp_timer_handle_t log_timer, send_timer;
 
 bool gl_unsent=false; // Это нужно, для выгрузки истории
+
+#define NVS_STORAGE_NAMESPACE "storage"
+
+void save_log_interval_to_nvs(uint32_t interval) 
+{
+    nvs_handle_t my_handle;
+    esp_err_t err;
+
+    // Открываем NVS пространство имен "storage" в режиме чтения/записи
+    err = nvs_open(NVS_STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+    if (err == ESP_OK) {
+        // Записываем наше 32-битное число под ключом "log_int"
+        err = nvs_set_u32(my_handle, "log_int", interval);
+        if (err == ESP_OK) {
+            // Фиксируем изменения на флешке
+            nvs_commit(my_handle);
+            ESP_LOGI("NVS", "Interval %u saved successfully", interval);
+        }
+        nvs_close(my_handle);
+    } else {
+        ESP_LOGE("NVS", "Error opening NVS handle!");
+    }
+}
+
+uint32_t read_log_interval_from_nvs(void) 
+{
+    nvs_handle_t my_handle;
+    esp_err_t err;
+    uint32_t interval = 300; // Значение по умолчанию (5 минут), если в NVS пусто
+
+    err = nvs_open(NVS_STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err == ESP_OK) {
+        // Пробуем прочитать значение
+        err = nvs_get_u32(my_handle, "log_int", &interval);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW("NVS", "Interval not found, using default 300s");
+        } else {
+            ESP_LOGI("NVS", "Logging interval set to %lus", interval);
+		}
+        nvs_close(my_handle);
+    }
+    return interval;
+}
 
 #define BLINK_GPIO 8
 void configure_led(void)
@@ -167,7 +213,7 @@ void timer_sending_cb(void* arg)
     xTaskNotifyGive(tcptask); 
 }
 
-#define NARODMON_PERIOD 60 // Period between narodmon sends(second)
+#define NARODMON_SEND_PERIOD 60 // Period between narodmon sends(second)
 void start_timers() 
 {
     timer_logging_cb(NULL); // Сразу пишем на флешку
@@ -177,12 +223,11 @@ void start_timers()
     const esp_timer_create_args_t log_timer_args = { .callback = &timer_logging_cb, .name = "log_timer" };
     const esp_timer_create_args_t send_timer_args = { .callback = &timer_sending_cb, .name = "send_timer" };
 
-    esp_timer_handle_t log_timer, send_timer;
     esp_timer_create(&log_timer_args, &log_timer);
     esp_timer_create(&send_timer_args, &send_timer);
 
     esp_timer_start_periodic(log_timer, log_interval_sec  * 1000000); // 5 минут в мкс
-    esp_timer_start_periodic(send_timer, NARODMON_PERIOD * 1000000);  // 1 минута в мкс
+    esp_timer_start_periodic(send_timer, NARODMON_SEND_PERIOD * 1000000);  // 1 минута в мкс
 }
 
 
@@ -214,12 +259,12 @@ void after_failure()
 
 #define HOST_IP_ADDR  "narodmon.ru"//"192.168.43.105" //"narodmon.ru"
 #define PORT 8283			// narodmon.com TCP-port address
-#define TIME_PERIOD 60*5  // Perod between sends(seconds) 
 
 void tcp_clientTask(void *pvParameters)
 {
     configure_led();
 	init_flash_logger();
+	log_interval_sec = read_log_interval_from_nvs();
 	gl_last_send_time = load_last_send_time(); //Load last sending time
 	printf("Last sending time from after reset ESP32 is %d\n", (int)gl_last_send_time);
 
@@ -229,11 +274,11 @@ void tcp_clientTask(void *pvParameters)
 	printf("Time of last send: %d\n", (int)gl_last_send_time);
 	int time_to_wait=0;
 	if (now-gl_last_send_time<0 || gl_last_send_time==0) //Последняя передача в будущем или мы считали 0
-		time_to_wait = TIME_PERIOD;
-	else if (now-gl_last_send_time < TIME_PERIOD)  //Валидные данные(наверное))
-		time_to_wait = TIME_PERIOD - (now - gl_last_send_time); // ms
+		time_to_wait = log_interval_sec;
+	else if (now-gl_last_send_time < log_interval_sec)  //Валидные данные(наверное))
+		time_to_wait = log_interval_sec - (now - gl_last_send_time); // ms
 	if (time_to_wait<0)
-		time_to_wait = TIME_PERIOD;
+		time_to_wait = log_interval_sec;
 	printf("Time to wait : %d second\n", time_to_wait);
 	vTaskDelay(pdMS_TO_TICKS(time_to_wait*1000)); //
 	start_timers();

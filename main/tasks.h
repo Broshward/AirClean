@@ -2,6 +2,7 @@
 #include <time.h>
 #include "esp_err.h"
 #include "esp_bt_defs.h"
+#include "esp_timer.h"
 
 
 void configure_led(void);
@@ -10,6 +11,7 @@ void tcp_clientTask(void *pvParameters); // prototype of task function from tcp_
 void timeTask(void *pvParameters);
 void test(void *pvParameters);
 void history_export_task(void *pvParameters);
+void save_log_interval_to_nvs(uint32_t interval);
 
 
 extern float gl_luminosity;
@@ -19,6 +21,8 @@ extern uint8_t gl_temperature[2];
 
 extern time_t gl_last_send_time;
 extern uint32_t log_interval_sec;
+
+extern esp_timer_handle_t log_timer, send_timer;
 
 extern bool gl_unsent; 
 

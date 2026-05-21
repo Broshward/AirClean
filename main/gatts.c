@@ -198,6 +198,29 @@ void sensor_gatts_cb(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 					// Опционально: шлем подтверждение во Flutter, если нужно обновить интерфейс
 					send_ble_data("SKIP_OK");
 				}
+				if (strncmp(cmd_str, "SET_INTERVAL:", 13) == 0) {
+					uint32_t new_interval = atoi(cmd_str + 13);
+					
+					// Защита «от дурака» на стороне Си (интервал от 1 минуты до 24 часов)
+					if (new_interval >= 60 && new_interval <= 86400) {
+						log_interval_sec = new_interval;
+						
+						// Перезапускаем наш программный таймер логирования с новым периодом!
+						// esp_timer принимает время в микросекундах
+						esp_timer_stop(log_timer);
+						esp_timer_start_periodic(log_timer, (uint64_t)log_interval_sec * 1000000);
+						
+						// Железно сохраняем этот интервал в NVS (или EEPROM часов), чтобы не стерся при рестарте
+						save_log_interval_to_nvs(log_interval_sec);
+						
+						ESP_LOGI("GATTS", "Log interval successfully updated to %u sec", log_interval_sec);
+					}
+				}
+				if (strcmp(cmd_str, "GET_INTERVAL") == 0) {
+					char rsp_str[32];
+					snprintf(rsp_str, sizeof(rsp_str), "LOG_INT:%lu", log_interval_sec);
+					send_ble_data(rsp_str); // Отправляем текущее значение во Flutter
+				}
 
 				free(cmd_str);
 			}
@@ -229,13 +252,5 @@ void send_ble_data(const char* data)
 
         xSemaphoreGive(ble_send_mutex);
     }
-
-//    if (sensor_gatt_if == ESP_GATT_IF_NONE || sensor_conn_id == 0xffff) return;
-//
-//    if (xSemaphoreTake(ble_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-//        esp_ble_gatts_send_indicate(sensor_gatt_if, sensor_conn_id, sensor_handle, 
-//                                    strlen(data), (uint8_t *)data, false);
-//        xSemaphoreGive(ble_send_mutex);
-//    }
 }
 
